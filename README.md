@@ -51,4 +51,4 @@ Bila memakai Neon, isi `DATABASE_URL` di `.env` dengan URL pooled untuk aplikasi
 
 ## CI/CD
 
-Workflow `.github/workflows/stock-signal.yml` menjalankan tes, smoke test engine training sintetis, dan build Docker. Deploy dilakukan setelah memilih host container dan mengatur `DATABASE_URL` PostgreSQL serta variabel runtime yang diperlukan.
+Workflow `.github/workflows/stock-signal.yml` menjalankan tes, smoke test engine training sintetis, dan build Docker standar maupun Vercel. Untuk deploy ke Vercel, hubungkan repository ini dengan project yang menggunakan root directory repository, lalu simpan URL pooled PostgreSQL sebagai environment variable `DATABASE_URL`. Vercel mendeteksi `Dockerfile.vercel` dan membangun container FastAPI.
