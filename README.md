@@ -32,10 +32,11 @@ Gunakan Python 3.12 atau lebih baru dan pasang dependensi:
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements-dev.txt
+Copy-Item .env.example .env
 python -m uvicorn backend_api:app --reload
 ```
 
-Buka `http://127.0.0.1:8000`. Jika Yahoo Finance tidak dapat dijangkau, aplikasi mencoba cache lokal lalu dataset penelitian. UI menandai dataset penelitian sebagai historis dan bukan harga terkini.
+Bila memakai Neon, isi `DATABASE_URL` di `.env` dengan URL pooled untuk aplikasi. `DATABASE_URL_UNPOOLED` dapat disimpan untuk alat migrasi. Tanpa `.env`, aplikasi memakai SQLite lokal. Buka `http://127.0.0.1:8000`. Jika Yahoo Finance tidak dapat dijangkau, aplikasi mencoba cache lokal lalu dataset penelitian. UI menandai dataset penelitian sebagai historis dan bukan harga terkini.
 
 ## Endpoint
 

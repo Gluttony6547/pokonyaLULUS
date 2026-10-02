@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
@@ -9,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 DATA_DIRECTORY = Path(__file__).resolve().parent / "data"
 DATA_DIRECTORY.mkdir(parents=True, exist_ok=True)
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 database_url = os.getenv("DATABASE_URL")
 if not database_url:
