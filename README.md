@@ -10,7 +10,7 @@ Skema di aplikasi mempertahankan entitas penelitian tersebut, lalu menambahkan `
 
 Relasi utama PDM: `stocks` memiliki banyak `stock_prices`, `technical_indicators`, `news_articles`, `news_sentiment`, `fused_market_data`, dan `prediction_requests`; satu permintaan menghasilkan paling banyak satu `predictions`; satu `model_versions` dapat menghasilkan banyak `predictions`. Kunci unik ticker-tanggal mencegah duplikasi harga, indikator, sentimen, dan fitur gabungan.
 
-GitHub Actions memeriksa dependensi, kompilasi Python, seluruh tes, dan build Docker setiap push ke `main` serta pull request. Aplikasi berjalan sebagai layanan FastAPI dalam container. Untuk produksi, gunakan PostgreSQL terkelola; SQLite disiapkan untuk pengembangan lokal.
+GitHub Actions memeriksa dependensi, kompilasi Python, seluruh tes, smoke test engine ensemble sintetis, dan build Docker setiap push ke `main` serta pull request. Aplikasi berjalan sebagai layanan FastAPI dalam container. Untuk produksi, gunakan PostgreSQL terkelola; SQLite disiapkan untuk pengembangan lokal.
 
 API ini membawa model H5 dan runtime inferensi Python, sehingga image Docker menjadi unit deployment yang sesuai. Deploy membutuhkan host container dan database PostgreSQL yang dikonfigurasi.
 
@@ -51,4 +51,4 @@ Bila memakai Neon, isi `DATABASE_URL` di `.env` dengan URL pooled untuk aplikasi
 
 ## CI/CD
 
-Workflow `.github/workflows/stock-signal.yml` menjalankan tes dan membangun image Docker. Deploy dilakukan setelah memilih host container dan mengatur `DATABASE_URL` PostgreSQL serta variabel runtime yang diperlukan.
+Workflow `.github/workflows/stock-signal.yml` menjalankan tes, smoke test engine training sintetis, dan build Docker. Deploy dilakukan setelah memilih host container dan mengatur `DATABASE_URL` PostgreSQL serta variabel runtime yang diperlukan.
