@@ -6,8 +6,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements-torch-cpu.txt ./
+RUN pip install --no-cache-dir -r requirements-torch-cpu.txt \
+    && pip install --no-cache-dir -r requirements.txt \
+    && python -c "import torch; assert torch.version.cuda is None"
 
 COPY . .
 
