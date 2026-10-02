@@ -20,6 +20,8 @@ Artefak yang ditemukan di `CODE` mencakup model LSTM regresi harga `Target_1`, `
 
 Kode `training_engine.py` memuat rancangan tiga jalur, tetapi tidak ditemukan artefak tersimpan untuk voter machine learning dan deep learning yang bisa dipakai oleh layanan ini. Oleh sebab itu, dashboard hanya menjalankan LSTM regresi yang tersedia. Indikator teknikal dihitung dan ditampilkan untuk konteks, tetapi tidak diklaim sebagai masukan model. Angka confidence dan sinyal ensemble tidak ditampilkan.
 
+Engine ensemble eksperimental memakai dependensi opsional. Pasang `requirements-training.txt`, lalu jalankan `python training_engine.py` untuk smoke test dengan data sintetis; hasilnya bukan model produksi atau validasi performa investasi.
+
 ## Arah desain
 
 Reading this as: dashboard penelitian saham untuk mahasiswa dan pembaca data pasar, dengan bahasa visual editorial yang tenang, dial ENERGY 1 / RHYTHM 2 / MOTION 1. Latar terang menjadi default untuk membaca angka dalam sesi panjang, sedangkan mode gelap tersedia sebagai pilihan. Tipografi sistem menghindari unduhan font eksternal dan angka memakai tabular figures. Komposisi memprioritaskan harga serta hasil inferensi; aksen hijau menandai data grafik, sementara warna sinyal hanya dipakai untuk makna BELI, JUAL, atau TAHAN. Jarak antarpanel memisahkan kelompok analisis, dan batas tipis mengelompokkan informasi tanpa membuatnya terlihat mengambang. Ticker, tanggal data, dan sumber harga menjadi motif identitas berulang karena keterlacakan data penting dalam penelitian. Tidak ada logo atau ilustrasi buatan.
