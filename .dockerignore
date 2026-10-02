@@ -5,4 +5,11 @@ __pycache__
 *.py[cod]
 data/stock_signal.db
 requirements-dev.txt
+requirements-training.txt
 test_suite.py
+training_engine.py
+2026053141-1.pdf
+Prompt.md
+Prompt_Mermaid.md
+README.md
+AGENTS.md
