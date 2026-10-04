@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r requirements-torch-cpu.txt \
     && python -c "import torch; assert torch.version.cuda is None"
 
 COPY Prog5/prog5 ./Prog5/prog5
+COPY Prog5/data/prog5.sqlite3 ./Prog5/data/prog5.sqlite3
 COPY Prog5/data/research/Fusion_Data_*.csv ./Prog5/data/research/
 COPY Prog5/data/research/Labelled_Stock_*.csv ./Prog5/data/research/
 COPY models ./models

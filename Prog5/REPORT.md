@@ -245,10 +245,11 @@ Commands and observations:
   research CSVs (maximum absolute difference 0.004977 IDR), and the existing
   training-engine smoke run completes.
 - The local machine has no Docker CLI, so container builds remain delegated to
-  the two GitHub Actions image-build steps. A Neon snapshot import attempt was
-  rejected with password authentication failure before any database write;
-  refresh `DATABASE_URL` with the current Neon credential before relying on
-  hosted data.
+  the two GitHub Actions image-build steps. The previously supplied manual
+  Neon credential was stale and rejected before any database write. Production
+  itself has a working PostgreSQL connection, so it now seeds an empty database
+  from the verified bundled snapshot exactly once under a PostgreSQL advisory
+  lock. Existing production rows are preserved; later instances skip the import.
 
 ## antislop Delivery Gate
 

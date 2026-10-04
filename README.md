@@ -23,7 +23,9 @@ The dashboard is at `/`, API docs at `/docs`, and health at `/api/v1/health`. Wi
 
 Set `DATABASE_URL` to Neon's pooled connection string for the running service. Keep the direct URL out of deployment runtime; use it only for one-time administration or bulk snapshot import. At startup Prog5 creates its additive tables with a `prog5_` prefix, leaving the existing application's tables untouched.
 
-Import the existing local snapshot once before opening the dashboard:
+An empty production database is seeded at first startup from the reviewed
+snapshot bundled in `Prog5/data/prog5.sqlite3`. Existing data is never replaced.
+For manual repair or an intentional import, use:
 
 ```powershell
 $env:PROG5_DATABASE_URL = $env:DATABASE_URL_UNPOOLED

@@ -65,6 +65,11 @@ def db_path() -> Path:
     return PROJECT_DIR / "data" / "prog5.sqlite3"
 
 
+def snapshot_path() -> Path:
+    """Bundled, reviewed SQLite seed used when a production database is empty."""
+    return PROJECT_DIR / "data" / "prog5.sqlite3"
+
+
 def database_url() -> str | None:
     """Postgres is used when configured; otherwise keep local SQLite behavior."""
     for name in (
