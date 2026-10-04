@@ -2,17 +2,25 @@ FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    KERAS_BACKEND=torch
+    KERAS_BACKEND=torch \
+    PYTHONPATH=/app/Prog5 \
+    PROG5_ARTIFACT_DIR=/app/models \
+    PROG5_RESEARCH_DATA_DIR=/app/Prog5/data/research
 
 WORKDIR /app
 
 COPY requirements.txt requirements-torch-cpu.txt ./
+COPY Prog5/requirements.txt /tmp/prog5-requirements.txt
 RUN pip install --no-cache-dir -r requirements-torch-cpu.txt \
     && pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir -r /tmp/prog5-requirements.txt \
     && python -c "import torch; assert torch.version.cuda is None"
 
-COPY . .
+COPY Prog5/prog5 ./Prog5/prog5
+COPY Prog5/data/research/Fusion_Data_*.csv ./Prog5/data/research/
+COPY Prog5/data/research/Labelled_Stock_*.csv ./Prog5/data/research/
+COPY models ./models
 
-EXPOSE 8000
+EXPOSE 80
 
-CMD ["uvicorn", "backend_api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "uvicorn prog5.api:app --host 0.0.0.0 --port ${PORT:-80}"]

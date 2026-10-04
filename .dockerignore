@@ -3,6 +3,8 @@
 .pytest_cache
 __pycache__
 *.py[cod]
+Prog5/tests
+Prog5/prog5/prog5
 data/stock_signal.db
 requirements-dev.txt
 requirements-training.txt
