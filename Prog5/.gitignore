@@ -1,6 +1,8 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
-data/prog5.sqlite3*
+data/prog5.sqlite3-wal
+data/prog5.sqlite3-shm
+data/*.lock
 /prog5/prog5/
 /tests/tests/
