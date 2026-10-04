@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Prog5 IDX signal desk</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/app/app.css">
+  <script>
+    // Set the theme before first paint so the page never flashes the wrong one.
+    (function () {
+      var theme = "light";
+      try {
+        var stored = localStorage.getItem("prog5-theme");
+        if (stored === "light" || stored === "dark") {
+          theme = stored;
+        } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+          theme = "dark";
+        }
+      } catch (error) {
+        // Storage can be blocked; light is a safe default.
+      }
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to data</a>
+
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <p class="wordmark"><span class="wordmark-mark" aria-hidden="true">P5</span> Prog5 <span class="wordmark-sub">IDX signal desk</span></p>
+    <button id="theme-toggle" class="theme-toggle" type="button" aria-pressed="false">Dark mode</button>
+  </div>
+</header>
+
+<main id="main" class="wrap">
+  <section class="controls" aria-label="Ticker and horizon selection">
+    <div class="field">
+      <label for="ticker-select">Ticker</label>
+      <select id="ticker-select" name="ticker"></select>
+    </div>
+    <div class="field">
+      <span class="field-label" id="horizon-label">Horizon</span>
+      <div class="horizon-group" role="group" aria-labelledby="horizon-label">
+        <button type="button" class="horizon-button" data-horizon="1" aria-pressed="true">T+1</button>
+        <button type="button" class="horizon-button" data-horizon="5" aria-pressed="false">T+5</button>
+        <button type="button" class="horizon-button" data-horizon="10" aria-pressed="false">T+10</button>
+        <button type="button" class="horizon-button" data-horizon="20" aria-pressed="false">T+20</button>
+        <button type="button" class="horizon-button" data-horizon="50" aria-pressed="false">T+50</button>
+      </div>
+    </div>
+    <p class="controls-note" id="selection-note" role="status"></p>
+  </section>
+
+  <section id="prediction" class="prediction" aria-label="Latest stored prediction" aria-busy="true">
+    <p class="panel-loading" role="status">Loading the latest stored prediction.</p>
+  </section>
+
+  <section class="panel" aria-labelledby="history-heading">
+    <h2 id="history-heading">Price history</h2>
+    <p class="panel-note">Stored end-of-day closes for the selected ticker, latest 180 sessions.</p>
+    <div id="chart-wrap"></div>
+    <div id="indicator-chips"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="prediction-history-heading">
+    <h2 id="prediction-history-heading">Prediction history</h2>
+    <p class="panel-note" id="prediction-history-note"></p>
+    <div id="prediction-history"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="runs-heading">
+    <h2 id="runs-heading">Refresh runs</h2>
+    <p class="panel-note">Every stored prediction comes from one of these pipeline runs.</p>
+    <div id="runs"></div>
+  </section>
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <p id="footer-status" class="footer-status"></p>
+    <p>Signals come from the lecturer's saved LSTM artifacts, executed by this service when a refresh run stores new data. Prices are Yahoo Finance end-of-day rows. <span id="storage-note"></span> Predictions are research output, not investment advice.</p>
+    <p class="footer-links">
+      <a href="/docs">API documentation</a>
+      <a href="/openapi.json">OpenAPI schema</a>
+      <a href="/api/v1/health">Health JSON</a>
+    </p>
+  </div>
+</footer>
+
+<noscript>
+  <p class="wrap noscript">This page needs JavaScript for data loading and the theme switch. The API works without it at <a href="/docs">/docs</a>.</p>
+</noscript>
+
+<script src="/app/app.js"></script>
+</body>
+</html>

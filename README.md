@@ -1,54 +1,58 @@
-# Dashboard Prediksi Saham
+# Prog5 IDX Signal Desk
 
-Dashboard FastAPI untuk melihat riwayat harga IDX dan menjalankan artefak LSTM untuk horizon 1, 5, 10, 20, dan 50 hari yang tersedia di direktori penelitian. Hasil yang ditampilkan adalah keluaran model regresi harga beserta sinyal berbasis ambang, bukan probabilitas keyakinan dan bukan rekomendasi investasi.
+Web dashboard for inspecting saved LSTM price forecasts for ten IDX tickers at T+1, T+5, T+10, T+20, and T+50. It reports the model output and threshold-based signal with data freshness and out-of-distribution context; it does not provide confidence probabilities or investment advice.
 
-## Pemilihan ERD dan PDM
+## Run locally
 
-`Prompt.md` menjadi dasar PDM karena skemanya menelusuri alur penelitian dari saham, data OHLCV, indikator, berita, sentimen, data gabungan, versi model sampai hasil prediksi. Itu membuat asal fitur dan keluaran model lebih mudah dijelaskan dalam skripsi daripada PDM `Prompt_Mermaid.md` yang berfokus pada akun, watchlist, permintaan pengguna, dan hasil prediksi generik.
-
-Skema di aplikasi mempertahankan entitas penelitian tersebut, lalu menambahkan `prediction_requests` untuk mencatat keberhasilan atau kegagalan inferensi dan `model_versions` untuk menautkan prediksi dengan artefak yang dipakai. Tabel berita, sentimen, dan data gabungan disiapkan untuk pipeline penelitian, namun aplikasi tidak mengarang berita atau sentimen. ERD pengguna, admin, dan watchlist dari prompt Mermaid dapat ditambahkan ketika autentikasi dan pengelolaan banyak pengguna benar-benar menjadi kebutuhan.
-
-Relasi utama PDM: `stocks` memiliki banyak `stock_prices`, `technical_indicators`, `news_articles`, `news_sentiment`, `fused_market_data`, dan `prediction_requests`; satu permintaan menghasilkan paling banyak satu `predictions`; satu `model_versions` dapat menghasilkan banyak `predictions`. Kunci unik ticker-tanggal mencegah duplikasi harga, indikator, sentimen, dan fitur gabungan.
-
-GitHub Actions memeriksa dependensi, kompilasi Python, seluruh tes, smoke test engine ensemble sintetis, dan build Docker setiap push ke `main` serta pull request. Aplikasi berjalan sebagai layanan FastAPI dalam container. Untuk produksi, gunakan PostgreSQL terkelola; SQLite disiapkan untuk pengembangan lokal.
-
-API ini membawa model H5 dan runtime inferensi Python, sehingga image Docker menjadi unit deployment yang sesuai. Deploy membutuhkan host container dan database PostgreSQL yang dikonfigurasi.
-
-## Batas model yang tersedia
-
-Artefak yang ditemukan di `CODE` mencakup model LSTM regresi harga `Target_1`, `Target_5`, `Target_10`, `Target_20`, dan `Target_50` untuk sepuluh ticker serta dataset hasil penelitian. Setiap model H5 menerima jumlah harga penutupan yang sesuai dengan horizon target sebagai satu fitur. Dataset latih yang tersedia berakhir pada 25 September 2023, sehingga performa model untuk data yang lebih baru belum tervalidasi. Skaler input dan target dibangun kembali dari dataset penelitian dengan pembagian acak `random_state=0`, mengikuti notebook asal karena artefak skaler tidak disimpan terpisah.
-
-Kode `training_engine.py` memuat rancangan tiga jalur, tetapi tidak ditemukan artefak tersimpan untuk voter machine learning dan deep learning yang bisa dipakai oleh layanan ini. Oleh sebab itu, dashboard hanya menjalankan LSTM regresi yang tersedia. Indikator teknikal dihitung dan ditampilkan untuk konteks, tetapi tidak diklaim sebagai masukan model. Angka confidence dan sinyal ensemble tidak ditampilkan.
-
-Engine ensemble eksperimental memakai dependensi opsional. Pasang `requirements-training.txt`, lalu jalankan `python training_engine.py` untuk smoke test dengan data sintetis; hasilnya bukan model produksi atau validasi performa investasi.
-
-## Arah desain
-
-Reading this as: dashboard penelitian saham untuk mahasiswa dan pembaca data pasar, dengan bahasa visual editorial yang tenang, dial ENERGY 1 / RHYTHM 2 / MOTION 1. Latar terang menjadi default untuk membaca angka dalam sesi panjang, sedangkan mode gelap tersedia sebagai pilihan. Tipografi sistem menghindari unduhan font eksternal dan angka memakai tabular figures. Komposisi memprioritaskan harga serta hasil inferensi; aksen hijau menandai data grafik, sementara warna sinyal hanya dipakai untuk makna BELI, JUAL, atau TAHAN. Jarak antarpanel memisahkan kelompok analisis, dan batas tipis mengelompokkan informasi tanpa membuatnya terlihat mengambang. Ticker, tanggal data, dan sumber harga menjadi motif identitas berulang karena keterlacakan data penting dalam penelitian. Tidak ada logo atau ilustrasi buatan.
-
-## Menjalankan lokal
-
-Gunakan Python 3.12 atau lebih baru dan pasang dependensi:
+Use Python 3.12+, then install and start the service from the repository root:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements-dev.txt
-Copy-Item .env.example .env
-python -m uvicorn backend_api:app --reload
+python -m pip install -r requirements-torch-cpu.txt
+python -m pip install -r Prog5/requirements-dev.txt
+$env:PYTHONPATH = "$PWD/Prog5"
+$env:PROG5_ARTIFACT_DIR = "$PWD/models"
+$env:PROG5_RESEARCH_DATA_DIR = "$PWD/Prog5/data/research"
+python -m prog5.cli serve --host 127.0.0.1
 ```
 
-Bila memakai Neon, isi `DATABASE_URL` di `.env` dengan URL pooled untuk aplikasi. `DATABASE_URL_UNPOOLED` dapat disimpan untuk alat migrasi. Tanpa `.env`, aplikasi memakai SQLite lokal. Buka `http://127.0.0.1:8000`. Jika Yahoo Finance tidak dapat dijangkau, aplikasi mencoba cache lokal lalu dataset penelitian. UI menandai dataset penelitian sebagai historis dan bukan harga terkini.
+The dashboard is at `/`, API docs at `/docs`, and health at `/api/v1/health`. Without `DATABASE_URL`, Prog5 stores local data in `Prog5/data/prog5.sqlite3`.
 
-## Endpoint
+## Neon and production
 
-- `GET /api/v1/health`: status database dan jumlah artefak model.
-- `GET /api/v1/stocks`: ticker yang memiliki artefak penelitian.
-- `GET /api/v1/market-data/{symbol}?period=1y`: riwayat harga, indikator, sumber data, dan tanggal data.
-- `POST /api/v1/predictions/{symbol}?horizon_days=50`: jalankan model untuk horizon 1, 5, 10, 20, atau 50 hari. Ambang sinyalnya 1,5%, 3%, 6%, 9%, dan 11%.
-- `GET /api/v1/predictions/latest/{symbol}?horizon_days=50`: hasil terbaru per horizon, atau `404` bila belum ada.
-- `GET /api/v1/predictions/history/{symbol}?horizon_days=50`: riwayat hasil inferensi per horizon.
+Set `DATABASE_URL` to Neon's pooled connection string for the running service. Keep the direct URL out of deployment runtime; use it only for one-time administration or bulk snapshot import. At startup Prog5 creates its additive tables with a `prog5_` prefix, leaving the existing application's tables untouched.
 
-## CI/CD
+Import the existing local snapshot once before opening the dashboard:
 
-Workflow `.github/workflows/stock-signal.yml` menjalankan tes, smoke test engine training sintetis, dan build Docker standar maupun Vercel. Untuk deploy ke Vercel, hubungkan repository ini dengan project yang menggunakan root directory repository, lalu simpan URL pooled PostgreSQL sebagai environment variable `DATABASE_URL`. Vercel mendeteksi `Dockerfile.vercel` dan membangun container FastAPI.
+```powershell
+$env:PROG5_DATABASE_URL = $env:DATABASE_URL_UNPOOLED
+python -m prog5.cli import-snapshot --sqlite-path "C:\path\to\prog5.sqlite3"
+```
+
+The importer preserves existing records and can be rerun safely. Configure `PROG5_ARTIFACT_DIR` and `PROG5_RESEARCH_DATA_DIR` only when running outside the included Docker image; the Vercel image sets these paths itself. Local scheduler execution remains an operator-managed process; Vercel's ephemeral filesystem is not used for scheduled writes.
+
+## Model and data provenance
+
+The image includes the 50 LSTM `.h5` files from `CODE/Price Prediction Model` and the fusion and labelled close series needed to reconstruct scalers. Their SHA-256 values match the original model files. GRU/RNN experiments, replication outputs, raw stock fixtures, notebooks, workbooks, raw news, and unrelated research exports stay outside the runtime image; CI retains the verification fixtures and `prog5.cli verify` compares predictions with the research CSVs.
+
+The source models were trained on data ending in 2023. Out-of-distribution and corporate-action checks are warnings/guards; they do not correct regime drift or make the forecasts reliable for trading.
+
+## Verification
+
+```powershell
+$env:PYTHONPATH = "$PWD/Prog5"
+$env:PROG5_ARTIFACT_DIR = "$PWD/models"
+$env:PROG5_RESEARCH_DATA_DIR = "$PWD/Prog5/data/research"
+python -m pytest -q Prog5/tests
+python -m prog5.cli inventory
+python -m prog5.cli verify
+```
+
+GitHub Actions runs both the existing application checks and the Prog5 test, artifact replication, and Docker build checks. The linked Vercel project deploys its container from `main`.
+
+## Product and engineering decisions
+
+- [Prog5 PRD](Prog5/PRD.md)
+- [Engineering notes and PDM](Prog5/NOTE.md)
+- [Verification report](Prog5/REPORT.md)

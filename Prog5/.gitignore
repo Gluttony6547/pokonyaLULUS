@@ -1,0 +1,6 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+data/prog5.sqlite3*
+/prog5/prog5/
+/tests/tests/
