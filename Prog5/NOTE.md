@@ -9,7 +9,7 @@ verified by running, and what the lecturer's artifacts cannot do.
 | --- | --- | --- |
 | Language/runtime | Python 3.12+ (developed on 3.14) | The model artifacts are Keras 3 H5 files; Python is the only practical host. |
 | Web framework | FastAPI + uvicorn | Typed response models, dependency injection for sessions, OpenAPI docs for free. |
-| Persistence | SQLite locally; PostgreSQL/Neon in production, via SQLAlchemy 2.0 | Local setup stays simple while deployed state survives Vercel instance replacement. Prog5 tables are prefixed to coexist with the earlier app. |
+| Persistence | PostgreSQL/Neon by default, reached either from the environment or from a gitignored `Prog5/.env`; SQLite only as a fallback and for tests | Data outlives any instance: the deployed container is read-only and every writer targets the same Postgres. Prog5 tables are prefixed to coexist with the earlier app. |
 | Inference placement | Off the request path. `python -m prog5.cli refresh` writes rows; the API only reads them | The measured cold start of this model under torch is ~13 s (from the earlier Prog3 validation), which is unacceptable per-request. Predictions are EOD data anyway. |
 | Keras backend | `torch`, set in `prog5/__init__.py` before keras imports | TensorFlow is not installed; the artifacts load and run under torch, verified below. |
 | Market data | Yahoo Finance (`.JK` tickers), `auto_adjust=False`, 5-year window | Free, and it returned data through the last trading day (2026-10-02) during the build. |
@@ -155,7 +155,7 @@ Settings, all read from the environment at call time:
 
 | Env var | Default | Meaning |
 | --- | --- | --- |
-| `PROG5_SCHEDULE_TIMES` | `17:30` | Local HH:MM list, comma separated. 17:30 WIB is after the IDX close and Yahoo's EOD update; adjust if the provider posts later. |
+| `PROG5_SCHEDULE_TIMES` | `17:30,21:00` | Local HH:MM list, comma separated. Both slots run per weekday: Yahoo's EOD update usually lands by 17:30 WIB but sometimes drifts later, so the evening slot re-runs the pipeline and fills any gap. |
 | `PROG5_SCHEDULE_DAYS` | `mon,tue,wed,thu,fri` | Weekday names; weekends stay quiet because IDX does not trade. |
 | `PROG5_SCHEDULE_SYMBOLS` | all ten | Tickers refreshed by a scheduled run. |
 | `PROG5_SCHEDULE_RETRY_ATTEMPTS` | `2` | Extra attempts after a failed run. |
@@ -175,6 +175,79 @@ Running it on this Windows host, no Docker:
 3. Detached process (no console window), from PowerShell:
    `Start-Process python -ArgumentList '-m','prog5.cli','schedule'`. Stop it
    with Task Manager or `taskkill`.
+4. One command: `Prog5\scripts\install-windows-task.cmd` registers two
+   weekday tasks, "Prog5 daily refresh" at 17:35 and "Prog5 daily refresh
+   evening" at 21:05, each shortly after a pipeline slot so the due check
+   cannot race the trigger. Both run
+   `Prog5\scripts\run-scheduled-refresh.cmd`, which does the due check, appends
+   to `Prog5\data\scheduler.log`, and accepts `--force` for manual repair. The
+   runner re-reads `PROG5_DATABASE_URL` from the user registry every tick, so
+   `setx` takes effect without a fresh logon. The tasks run as the signed-in
+   user, so they only fire while that user is logged on; a missed evening is
+   recovered by the next run because every refresh fetches the full five-year
+   history.
+
+## Trading-day target dates
+
+The artifacts predict H trading sessions ahead, but a horizon alone does not
+tell a reader when the prediction lands. `prog5/trading_calendar.py` projects
+the calendar date: IDX trades Monday to Friday, so `target_date(data_as_of, H)`
+walks H weekdays forward and never returns a Saturday or Sunday. 2026-10-06
+(Tue) + 10 sessions is 2026-10-20 (Tue), with two weekends skipped; Friday + 1
+is Monday; H=0 returns the start date. Exchange holidays are not modeled
+because Yahoo returns no rows for them and the freshness label already absorbs
+the gap.
+
+- `Prediction.target_date` (nullable Date) stores the projection per row.
+  `db.init_db()` adds the column to existing databases with an
+  `ALTER TABLE ... ADD COLUMN` when missing; fresh databases get it from
+  `create_all`. Rows predating the column keep NULL and render "n/a" in the UI
+  until their (symbol, horizon, data_as_of) row is refreshed again.
+- The refresh report and the API expose `target_date`. The dashboard's
+  prediction card shows the interval as "Output window" ("06 Oct 2026 to
+  20 Oct 2026, 10 sessions (weekends skipped)") and the prediction-history
+  table gained a Target column.
+- The prediction upsert keys on (symbol, horizon_days, data_as_of), so a
+  re-run for the same session updates the same row instead of adding one.
+
+## Keeping the deployed database current
+
+The Vercel deployment reads Neon, and its container seeds an empty database
+once from the bundled snapshot. Nothing in the container writes new rows, so
+the deployed card froze at the snapshot's 2026-10-02 closes until a writer ran
+against the same Neon database. Two writers cover that now:
+
+- GitHub Actions: `.github/workflows/prog5-refresh.yml` runs
+  `python -m prog5.cli refresh` for all ten tickers twice on weekdays, at
+  17:45 and 21:00 WIB (10:45 and 14:00 UTC). The concurrency group keeps the
+  two runs from overlapping. It refuses to run when the `DATABASE_URL`
+  repository secret is missing, so a misconfigured run fails loudly instead of
+  writing to the runner's throwaway SQLite file. The secret is added once under
+  Settings, Secrets and variables, Actions.
+
+Live proof (2026-10-06, GitHub runner, WIB):
+
+- A manual `workflow_dispatch` of `.github/workflows/prog5-refresh.yml` on the
+  deployment repo (run 37379910888, commit `36eb986`) succeeded in 2m39s. The
+  guard step "Refuse to run without the Neon connection string" passed, so the
+  `DATABASE_URL` repository secret exists.
+- Its log shows `DATABASE_URL: ***` in the step environment, all ten tickers
+  fetched from Yahoo Finance, then `refresh run #9 status=completed` and
+  `prices stored=12038 indicator rows stored=12038 predictions=50` between
+  22:04:26Z and 22:05:34Z.
+- The log never names the dialect, so the conclusive check is on the database
+  side: the same run #9 is in Neon (`started 2026-10-05 22:04:33.419344`,
+  `finished 2026-10-05 22:05:15.215378`, all ten symbols,
+  `prices=12038 indicators=12038 predictions=50 warnings=10`) and
+  `https://pokonya-lulus.vercel.app/api/v1/health` serves that row with
+  `"storage_backend":"postgresql"`. The runner can only have written it through
+  the secret, so it did not touch its throwaway SQLite file.
+- The operator host: set `PROG5_DATABASE_URL` in `Prog5/.env` (or in the
+  environment) and the Windows task above writes to the same Neon database
+  whenever this machine is on.
+
+Both entry points call the same `refresh()` pipeline and the same upserts, so
+running both is redundant but not corrupting; the only duplicate is a run row.
 
 Live proof (2026-10-04, Windows, WIB):
 
@@ -190,6 +263,63 @@ Live proof (2026-10-04, Windows, WIB):
   `kind=on_demand`; `refresh()` now takes a `kind` parameter and the scheduler
   passes `scheduled`. The default weekdays-only rule also kept a Sunday quiet
   until the test enabled all days, which is the documented behavior.
+
+Live proof (2026-10-05, Windows, WIB):
+
+- `Prog5\scripts\install-windows-task.cmd` registered "Prog5 daily refresh"
+  (weekly, MON-FRI, 17:35) and `schtasks /run` executed it against the live
+  database. The first tick exposed a real defect: `run_scheduled` queried
+  `prog5_refresh_runs` before `init_db()` ran, so a database that predates the
+  table rename failed with `no such table` and no run was ever scheduled. The
+  fix initialises the schema before the due check and is covered by
+  `tests/test_scheduler.py::test_scheduled_run_migrates_a_legacy_database_before_the_due_check`.
+- The next tick logged `Scheduled slot 2026-10-05 17:30 is due` and completed
+  refresh run #7 (`kind=scheduled`, all ten tickers, 50 predictions) in about
+  16 seconds; a forced tick then produced run #8 and left the stored counts
+  unchanged (12,048 / 12,048 / 100 before and after), so the writes are
+  idempotent with the new date included.
+- Served UI after the ticks: ADRO T+1 2,635.43 IDR buy, last close 2,590,
+  "DATA AS OF 05 Oct 2026 today", Fresh badge, and runs #7 and #8 both listed;
+  browser console had no errors and every request was a 200.
+
+## Where the data lives (Postgres, 2026-10-06)
+
+The local host now stores into the same Neon database the deployment reads;
+SQLite is only the fallback when no Postgres URL is configured.
+
+`prog5/config.py` reads an optional, gitignored `Prog5/.env` after the real
+environment (`env_value()`), so a workstation no longer depends on `setx` or
+on a fresh logon for `PROG5_DATABASE_URL` to take effect:
+
+- Real environment variables always win, and an empty value counts as unset.
+- A missing file is not an error; a clean checkout keeps the old SQLite path.
+- `PROG5_ENV_FILE` points the lookup elsewhere. `tests/conftest.py` uses it to
+  keep the suite on temporary SQLite files and now also asserts
+  `config.database_url() is None` in `temp_db`, so a developer's live URL can
+  never be written to by `python -m pytest`.
+- `Prog5/.env.example` documents the four accepted names
+  (`PROG5_DATABASE_URL`, `DATABASE_URL_POOLED`, `DATABASE_URL_UNPOOLED`,
+  `DATABASE_URL`); only values starting `postgres://`, `postgresql://` or
+  `postgresql+` switch storage over.
+
+Proof that one database serves both ends (2026-10-06, WIB):
+
+- With every `*DATABASE_URL*` variable removed from the shell, `python -m
+  prog5.cli refresh --symbols TLKM` resolved the URL from `.env`, printed
+  `refresh run #8 status=completed`, and left `Prog5/data/prog5.sqlite3`
+  untouched (its newest run was still #9 from the previous day).
+- `/api/v1/health` on this host and on `https://pokonya-lulus.vercel.app`
+  returned the same `last_run` block, byte-identical down to
+  `started_at=2026-10-05T21:48:54.608338` and
+  `summary=prices=1204 indicators=1204 predictions=5 warnings=1`, both with
+  `"storage_backend":"postgresql"`. The deployment is therefore reading the
+  row this laptop wrote, not a baked snapshot.
+- The dashboard footer reflects it: "Stored in PostgreSQL", 12,048 price rows,
+  12,048 indicator rows, 100 predictions, last refresh #8.
+
+The one thing this host cannot verify is whether the GitHub Actions secret
+`DATABASE_URL` exists: secrets are write-only through the API. The workflow
+fails loudly if it is absent.
 
 ## What the artifacts cannot support
 
@@ -230,6 +360,7 @@ prog5/api.py             read-only FastAPI endpoints
 prog5/scheduler.py       unattended refresh: due check, retries, loop
 prog5/static/            dashboard served at /app (index.html, app.css, app.js)
 prog5/cli.py             refresh / verify / inventory / serve / schedule
+scripts/                 Windows Task Scheduler runner and one-command installer
 ```
 
 ## Commands
@@ -237,14 +368,17 @@ prog5/cli.py             refresh / verify / inventory / serve / schedule
 ```powershell
 cd Prog5
 python -m pip install -r requirements-dev.txt
-python -m pytest -q                       # 48 tests
+python -m pytest -q                       # 72 tests
 python -m prog5.cli inventory             # artifact check per ticker
 python -m prog5.cli verify --symbols ADRO # replication against research CSVs
 python -m prog5.cli refresh --symbols ADRO,BMRI
 python -m prog5.cli schedule              # unattended refresh loop
 python -m prog5.cli schedule --once       # one due-check, for Task Scheduler
+.\scripts\install-windows-task.cmd        # register the weekday Task Scheduler job
 python -m prog5.cli serve                 # /docs for the API, /app for the dashboard
 ```
 
 Environment overrides: `PROG5_DB_PATH`, `PROG5_ARTIFACT_DIR`,
-`PROG5_RESEARCH_DATA_DIR`.
+`PROG5_RESEARCH_DATA_DIR`, `PROG5_DATABASE_URL` (Postgres switches storage
+over), `PROG5_ENV_FILE` (where the optional `.env` is read from). The same
+names work in `Prog5/.env`; see `Prog5/.env.example`.

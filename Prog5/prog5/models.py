@@ -102,6 +102,7 @@ class Prediction(Base):
     symbol: Mapped[str] = mapped_column(ForeignKey("prog5_stocks.symbol"), nullable=False, index=True)
     horizon_days: Mapped[int] = mapped_column(Integer, nullable=False)
     data_as_of: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    target_date: Mapped[date | None] = mapped_column(Date)
     window_start_date: Mapped[date] = mapped_column(Date, nullable=False)
     window_size: Mapped[int] = mapped_column(Integer, nullable=False)
     last_close: Mapped[float] = mapped_column(Float, nullable=False)

@@ -99,6 +99,7 @@ def store_prediction(session: Session, record: dict[str, object]) -> None:
         column: getattr(statement.excluded, column)
         for column in (
             "run_id",
+            "target_date",
             "window_start_date",
             "window_size",
             "last_close",

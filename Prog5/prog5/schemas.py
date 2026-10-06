@@ -50,6 +50,7 @@ class PredictionOut(BaseModel):
     symbol: str
     horizon_days: int
     data_as_of: date
+    target_date: date | None = None
     window_start_date: date
     window_size: int
     last_close: float

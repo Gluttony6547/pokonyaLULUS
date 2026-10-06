@@ -134,6 +134,9 @@ def run_scheduled(now_utc: datetime | None = None, force: bool = False) -> Sched
     reflected in the UI even when nothing is due.
     """
     now = now_utc if now_utc is not None else datetime.now(timezone.utc).replace(tzinfo=None)
+    # Create or migrate the tables before the first query: a fresh or pre-rename
+    # database would otherwise fail the due check and never schedule a run.
+    db.init_db()
     for run_id in reconcile_interrupted_runs():
         logger.warning("Marked interrupted refresh run #%s as failed", run_id)
     if not force:

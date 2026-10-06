@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import date
+
 import pandas as pd
 
 from prog5 import config
@@ -47,6 +49,27 @@ def test_refresh_stores_one_prediction_per_horizon(temp_db, monkeypatch):
 
     with temp_db.session() as session:
         assert session.query(Prediction).count() == len(config.HORIZONS)
+
+
+@requires_artifacts
+def test_refresh_records_the_trading_day_target_date(temp_db, monkeypatch):
+    frame = synthetic_frame()
+    data_as_of = frame["date"].iloc[-1]  # a Friday, so every target crosses a weekend
+    monkeypatch.setattr(refresh_module, "fetch_daily_ohlcv", lambda symbol, period=None: frame.copy())
+    monkeypatch.setattr(
+        refresh_module, "predict_price", lambda symbol, horizon, closes: float(frame["close"].iloc[-1])
+    )
+
+    report = refresh_module.refresh(["ADRO"], horizons=(1, 10))
+
+    assert report.status == "completed"
+    by_horizon = {row["horizon_days"]: row for row in report.predictions}
+    assert by_horizon[1]["target_date"] == date(2026, 10, 5)  # Friday close, Monday target
+    assert by_horizon[10]["target_date"] == date(2026, 10, 16)  # two weekend days skipped
+    with temp_db.session() as session:
+        row = session.query(Prediction).filter(Prediction.horizon_days == 10).one()
+        assert row.target_date == date(2026, 10, 16)
+        assert row.data_as_of == data_as_of
 
 
 @requires_artifacts

@@ -17,7 +17,6 @@ from .indicators import INDICATOR_COLUMNS
 from .model_registry import artifact_inventory
 from .models import Prediction, RefreshRun, Stock, StockPrice, TechnicalIndicator
 from .schemas import HealthOut, PredictionOut, PriceResponse, PriceRow, RunOut, StockOut
-from .snapshot import import_snapshot
 
 DESCRIPTION = (
     "Prediction service around the lecturer's saved LSTM price models. "
@@ -27,13 +26,6 @@ DESCRIPTION = (
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db.init_db()
-    if db.engine().dialect.name == "postgresql":
-        snapshot = config.snapshot_path()
-        if not snapshot.is_file():
-            raise RuntimeError(f"Production seed snapshot is missing: {snapshot}")
-        imported = import_snapshot(snapshot, only_if_empty=True)
-        if sum(imported.values()):
-            print(f"Prog5 seeded empty PostgreSQL storage from bundled snapshot: {imported}")
     yield
 
 

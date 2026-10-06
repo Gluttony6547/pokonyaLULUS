@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import MetaData, Table, create_engine, func, inspect, select, text
+from sqlalchemy import MetaData, Table, create_engine, inspect, text
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -12,7 +12,6 @@ from . import db
 from .models import Prediction, RefreshRun, Stock, StockPrice, TechnicalIndicator
 
 _TABLES = (Stock, StockPrice, TechnicalIndicator, RefreshRun, Prediction)
-_DATA_TABLES = (StockPrice, TechnicalIndicator, RefreshRun, Prediction)
 _LEGACY_NAMES = {
     "prog5_stocks": "stocks",
     "prog5_stock_prices": "stock_prices",
@@ -22,12 +21,8 @@ _LEGACY_NAMES = {
 }
 
 
-def import_snapshot(source: str | Path, *, only_if_empty: bool = False) -> dict[str, int]:
-    """Import a SQLite backup into the active database, preserving existing rows.
-
-    ``only_if_empty`` serializes production first-boot imports and leaves any
-    already-populated database untouched.
-    """
+def import_snapshot(source: str | Path) -> dict[str, int]:
+    """Import a SQLite backup into the active database, preserving existing rows."""
     path = Path(source).expanduser().resolve()
     if not path.is_file():
         raise FileNotFoundError(f"SQLite snapshot not found: {path}")
@@ -40,21 +35,6 @@ def import_snapshot(source: str | Path, *, only_if_empty: bool = False) -> dict[
     try:
         with source_engine.connect() as source_connection, target.begin() as target_connection:
             available = set(inspect(source_engine).get_table_names())
-            if only_if_empty and target_connection.dialect.name == "postgresql":
-                target_connection.execute(
-                    text("SELECT pg_advisory_xact_lock(hashtext('prog5-snapshot-import'))")
-                )
-                populated = any(
-                    target_connection.scalar(select(func.count()).select_from(model.__table__))
-                    for model in _DATA_TABLES
-                )
-                if populated:
-                    return {
-                        model.__table__.name: target_connection.scalar(
-                            select(func.count()).select_from(model.__table__)
-                        )
-                        for model in _TABLES
-                    }
             for model in _TABLES:
                 target_table = model.__table__
                 legacy_name = _LEGACY_NAMES[target_table.name]

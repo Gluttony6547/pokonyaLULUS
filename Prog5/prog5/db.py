@@ -53,8 +53,28 @@ def engine() -> Engine:
 def init_db() -> Engine:
     created = engine()
     _migrate_legacy_sqlite_tables(created)
+    _backfill_missing_columns(created)
     Base.metadata.create_all(created)
     return created
+
+
+def _backfill_missing_columns(created: Engine) -> None:
+    """Add columns created after a database's first schema.
+
+    SQLite and Postgres both treat ALTER TABLE ADD COLUMN with a NULL default
+    as metadata-only, so this is cheap to run on every startup. Rows predating
+    the column keep NULL and are re-derived on read (see refresh.refresh).
+    """
+    inspector = inspect(created)
+    with created.begin() as connection:
+        if "prog5_predictions" in inspector.get_table_names():
+            prediction_columns = {
+                column["name"] for column in inspect(created).get_columns("prog5_predictions")
+            }
+            if "target_date" not in prediction_columns:
+                connection.execute(
+                    text("ALTER TABLE prog5_predictions ADD COLUMN target_date DATE")
+                )
 
 
 def _migrate_legacy_sqlite_tables(created: Engine) -> None:

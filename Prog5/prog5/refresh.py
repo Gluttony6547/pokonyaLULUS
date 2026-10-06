@@ -33,6 +33,7 @@ from .model_registry import (
 from .models import RefreshRun
 from .signals import classify_return, is_out_of_distribution, out_of_distribution_z, signal_label
 from .storage import ensure_stock, store_indicators, store_prices, store_prediction
+from .trading_calendar import target_date as project_target_date
 
 logger = logging.getLogger(__name__)
 
@@ -136,13 +137,14 @@ class RefreshReport:
         ]
         if self.predictions:
             header = (
-                f"{'symbol':7s} {'T':>3s} {'as of':10s} {'close':>9s} {'predicted':>10s} "
-                f"{'ret%':>7s} {'thr%':>5s} {'signal':6s} {'z':>6s} {'ood':3s} model"
+                f"{'symbol':7s} {'T':>3s} {'as of':10s} {'target':10s} {'close':>9s} "
+                f"{'predicted':>10s} {'ret%':>7s} {'thr%':>5s} {'signal':6s} {'z':>6s} {'ood':3s} model"
             )
             lines.append(header)
             for row in self.predictions:
                 lines.append(
                     f"{row['symbol']:7s} {row['horizon_days']:3d} {str(row['data_as_of']):10s} "
+                    f"{str(row['target_date']):10s} "
                     f"{row['last_close']:9.1f} {row['predicted_price']:10.1f} "
                     f"{row['return_pct']:7.2f} {row['threshold_pct']:5.1f} "
                     f"{row['signal_label']:6s} {row['ood_z']:6.2f} "
@@ -250,6 +252,7 @@ def _refresh_locked(
                     "symbol": symbol,
                     "horizon_days": horizon,
                     "data_as_of": data_as_of,
+                    "target_date": project_target_date(data_as_of, horizon),
                     "window_start_date": frame["date"].iloc[-horizon],
                     "window_size": horizon,
                     "last_close": current,

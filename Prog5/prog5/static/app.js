@@ -260,6 +260,10 @@ function renderPrediction(symbol, horizon, latest, prices) {
   }
 
   const fresh = freshness(prediction.data_as_of);
+  const target = prediction.target_date
+    ? fmtDate(prediction.target_date)
+    : "the session " + horizon + " trading day" + (horizon === 1 ? "" : "s") + " ahead (weekends skipped)";
+  const sessionsLabel = horizon + " session" + (horizon === 1 ? "" : "s");
   const change = prediction.return_pct;
   const direction = change > 0 ? "up" : change < 0 ? "down" : "flat";
   const signalLabel = prediction.signal_label || "hold";
@@ -289,7 +293,7 @@ function renderPrediction(symbol, horizon, latest, prices) {
       <dl class="prediction-meta">
         <div><dt>Signal threshold</dt><dd>${fmtNumber(prediction.threshold_pct)}%</dd></div>
         <div><dt>Data as of</dt><dd>${fmtDate(prediction.data_as_of)} <span class="chip-label">${esc(fresh.ageText)}</span></dd></div>
-        <div><dt>Input window</dt><dd>${fmtDate(prediction.window_start_date)} to ${fmtDate(prediction.data_as_of)}, ${prediction.window_size} sessions</dd></div>
+        <div><dt>Output window</dt><dd>${fmtDate(prediction.data_as_of)} to ${target}, ${sessionsLabel} (weekends skipped)</dd></div>
         <div><dt>Stored</dt><dd>${fmtDateTime(prediction.created_at)}</dd></div>
         <div><dt>Model file</dt><dd class="mono">${esc(prediction.model_file)}</dd></div>
         <div><dt>Model SHA-256</dt><dd class="mono" title="${esc(prediction.model_sha256)}">${esc(prediction.model_sha256.slice(0, 12))}…</dd></div>
@@ -403,6 +407,7 @@ function renderPredictionHistory(symbol, horizon, history) {
         <thead>
           <tr>
             <th>Data as of</th>
+            <th>Target</th>
             <th class="num">Last close</th>
             <th class="num">Predicted</th>
             <th class="num">Return</th>
@@ -417,6 +422,7 @@ function renderPredictionHistory(symbol, horizon, history) {
             return `
             <tr>
               <td>${fmtDate(row.data_as_of)}</td>
+              <td>${row.target_date ? fmtDate(row.target_date) : "n/a"}</td>
               <td class="num">${fmtNumber(row.last_close)}</td>
               <td class="num">${fmtNumber(row.predicted_price)}</td>
               <td class="num delta-${direction}">${fmtPercent(row.return_pct)}</td>

@@ -58,15 +58,61 @@ def _resolve(env_name: str, candidates: list[Path], description: str) -> Path:
     )
 
 
-def db_path() -> Path:
-    override = os.environ.get("PROG5_DB_PATH")
+# ---------- Optional local environment file ----------
+# A gitignored .env beside this package points a workstation at Postgres
+# without exporting variables in every new shell. Real environment variables
+# always win, an empty value counts as unset, and a missing file is not an
+# error, so a clean checkout behaves exactly as before. PROG5_ENV_FILE sends
+# the lookup somewhere else, which is how the tests stay off a live database.
+
+ENV_FILE_NAME = ".env"
+
+
+def env_file_path() -> Path:
+    """Location of the optional environment file."""
+    override = os.environ.get("PROG5_ENV_FILE", "").strip()
     if override:
         return Path(override).expanduser().resolve()
-    return PROJECT_DIR / "data" / "prog5.sqlite3"
+    return PROJECT_DIR / ENV_FILE_NAME
 
 
-def snapshot_path() -> Path:
-    """Bundled, reviewed SQLite seed used when a production database is empty."""
+def _env_file_values(path: Path) -> dict[str, str]:
+    """Parse KEY=VALUE lines, skipping blanks, comments and quoted values."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    values: dict[str, str] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, _, value = line.partition("=")
+        if name.startswith("export "):
+            name = name.removeprefix("export ")
+        value = value.strip()
+        if len(value) > 1 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if name.strip():
+            values[name.strip()] = value
+    return values
+
+
+def env_value(name: str, default: str | None = None) -> str | None:
+    """Resolve a setting from the environment, then from the optional .env."""
+    raw = os.environ.get(name)
+    if raw is not None and raw.strip():
+        return raw
+    value = _env_file_values(env_file_path()).get(name)
+    if value is not None and value.strip():
+        return value
+    return default
+
+
+def db_path() -> Path:
+    override = env_value("PROG5_DB_PATH")
+    if override:
+        return Path(override).expanduser().resolve()
     return PROJECT_DIR / "data" / "prog5.sqlite3"
 
 
@@ -78,7 +124,7 @@ def database_url() -> str | None:
         "DATABASE_URL_UNPOOLED",
         "DATABASE_URL",
     ):
-        value = os.environ.get(name, "").strip()
+        value = env_value(name) or ""
         if value.startswith(("postgres://", "postgresql://", "postgresql+")):
             return value
     return None
@@ -167,7 +213,7 @@ _DAY_NAMES = {"mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun":
 
 
 def _env_int(name: str, default: int) -> int:
-    raw = os.environ.get(name)
+    raw = env_value(name)
     if raw is None or not raw.strip():
         return default
     try:
@@ -178,7 +224,10 @@ def _env_int(name: str, default: int) -> int:
 
 def schedule_times() -> tuple[time, ...]:
     """Local times of day the refresh should run, from PROG5_SCHEDULE_TIMES."""
-    raw = os.environ.get("PROG5_SCHEDULE_TIMES", "17:30")
+    # Two slots per trading day: Yahoo's EOD update for IDX names usually
+    # lands by 17:30 WIB but sometimes drifts later, so the evening slot
+    # catches stragglers and self-heals any missed afternoon run.
+    raw = env_value("PROG5_SCHEDULE_TIMES", "17:30,21:00") or ""
     times: list[time] = []
     for part in raw.split(","):
         part = part.strip()
@@ -198,7 +247,7 @@ def schedule_times() -> tuple[time, ...]:
 
 def schedule_days() -> frozenset[int]:
     """Weekdays the schedule applies to, from PROG5_SCHEDULE_DAYS."""
-    raw = os.environ.get("PROG5_SCHEDULE_DAYS", "mon,tue,wed,thu,fri")
+    raw = env_value("PROG5_SCHEDULE_DAYS", "mon,tue,wed,thu,fri") or ""
     days: set[int] = set()
     for part in raw.split(","):
         key = part.strip().lower()[:3]
@@ -216,7 +265,7 @@ def schedule_days() -> frozenset[int]:
 
 def schedule_symbols() -> tuple[str, ...]:
     """Tickers a scheduled run refreshes, from PROG5_SCHEDULE_SYMBOLS."""
-    raw = os.environ.get("PROG5_SCHEDULE_SYMBOLS")
+    raw = env_value("PROG5_SCHEDULE_SYMBOLS")
     if raw is None or not raw.strip():
         return SUPPORTED_SYMBOLS
     symbols = tuple(part.strip().upper() for part in raw.split(",") if part.strip())

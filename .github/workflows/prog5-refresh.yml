@@ -8,10 +8,12 @@ name: Prog5 daily refresh
 # report success while the deployed site stayed frozen.
 on:
   schedule:
-    # 10:45 UTC is 17:45 WIB (UTC+7), after the IDX close, after Yahoo's EOD
-    # update, and just after the host tick at 17:35 so the two writers rarely
-    # overlap. The IDX calendar trades Monday to Friday.
-    - cron: "45 10 * * 1-5"
+    # Two slots per trading day. Yahoo's EOD update for IDX names usually
+    # lands by 17:30 WIB but sometimes drifts later, so the evening slot
+    # re-runs the pipeline and fills any gap. The concurrency group keeps
+    # the two writers from overlapping.
+    - cron: "45 10 * * 1-5"  # 17:45 WIB, after the afternoon host tick
+    - cron: "0 14 * * 1-5"   # 21:00 WIB, catches late Yahoo EOD updates
   workflow_dispatch:
 
 permissions:

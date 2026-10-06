@@ -245,11 +245,174 @@ Commands and observations:
   research CSVs (maximum absolute difference 0.004977 IDR), and the existing
   training-engine smoke run completes.
 - The local machine has no Docker CLI, so container builds remain delegated to
-  the two GitHub Actions image-build steps. The previously supplied manual
-  Neon credential was stale and rejected before any database write. Production
-  itself has a working PostgreSQL connection, so it now seeds an empty database
-  from the verified bundled snapshot exactly once under a PostgreSQL advisory
-  lock. Existing production rows are preserved; later instances skip the import.
+  the two GitHub Actions image-build steps. A Neon snapshot import attempt was
+  rejected with password authentication failure before any database write;
+  refresh `DATABASE_URL` with the current Neon credential before relying on
+  hosted data.
+
+## 13. Daily freshness fix (2026-10-05)
+
+Commands and observations, in order:
+
+- Diagnosis: the Vercel deployment (`Gluttony6547/pokonyaLULUS`) runs the
+  container from `Dockerfile.vercel`, which copies `Prog5/data/prog5.sqlite3`
+  and seeds Neon only when that database is empty. Nothing writes later rows to
+  Neon, and no scheduled task existed on this host, so the deployed card stayed
+  at the snapshot's 2026-10-02 closes.
+- `python -m pytest -q` before the change: 63 passed, exit 0. After: 64 passed,
+  3 warnings, exit 0.
+- `scripts\install-windows-task.cmd` registered "Prog5 daily refresh" for
+  weekdays at 17:35, and `schtasks /run /tn "Prog5 daily refresh"` fired it.
+  The task ran as the signed-in user with no Docker and no elevation.
+- First tick failed: `sqlite3.OperationalError: no such table:
+  prog5_refresh_runs`, because `run_scheduled` queried the runs table before
+  `init_db()` created or migrated it. Fixed in `prog5/scheduler.py`; the new
+  regression test
+  `tests/test_scheduler.py::test_scheduled_run_migrates_a_legacy_database_before_the_due_check`
+  passes.
+- Second tick: `Scheduled slot 2026-10-05 17:30 is due`, then `scheduled
+  refresh: ran=True attempts=1 reason=refresh run #7 completed (50
+  predictions)`, exit 0. Run #7 is `kind=scheduled`, `status=completed`,
+  `prices=12038 indicators=12038 predictions=50 warnings=10`.
+- Stored state after run #7: all ten tickers have a 2026-10-05 close and
+  2026-10-05 predictions at all five horizons; 12,048 price rows, 12,048
+  indicator rows, 100 prediction rows (two dates per ticker and horizon).
+- Idempotency: a forced tick (`run-scheduled-refresh.cmd --force`, stored as
+  run #8) left the counts at 12,048 / 12,048 / 100, unchanged.
+- API: `/api/v1/health` reported `storage sqlite, stocks 10, prices 12048,
+  predictions 100, last_run #8 scheduled completed`. BMRI latest T+1:
+  `data_as_of 2026-10-05`, close 4,100, predicted 4,127.5, hold; T+50 5,015.58,
+  buy, 11% threshold.
+- Served UI (`uvicorn prog5.api:app` on 127.0.0.1:8123, registered preview):
+  ADRO T+1 rendered 2,635.43 IDR buy, last close 2,590, "DATA AS OF 05 Oct 2026
+  today", Fresh badge, STORED 05 Oct 2026 22:14, prediction history with both
+  05 and 02 Oct rows, and runs #8/#7/#6 listed. The browser console was empty
+  and every network response was 200.
+- The legacy database was migrated in place from the unprefixed table names to
+  the `prog5_` names; a pre-migration copy was kept at
+  `/tmp/prog5-backup-pre-migration.sqlite3` and the stray probe database at
+  `prog5/prog5/data/` was removed.
+
+Not delivered from this machine:
+
+- The GitHub Actions writer (`.github/workflows/prog5-refresh.yml`) needs the
+  `DATABASE_URL` repository secret; the workflow was pushed to
+  `Gluttony6547/pokonyaLULUS` as `36eb986` later that day. The secret is the
+  only part that cannot be checked from here, and the job fails loudly without
+  it. Until it is set, the operator host remains the writer.
+- Yahoo Finance fetches from GitHub's datacenter IPs can be rate limited; the
+  operator host path has no such limitation, and both writers are idempotent.
+- A Task Scheduler run missed while the user is signed out is recovered by the
+  next weekday run, because every refresh stores the full five-year history.
+
+## 14. Postgres by default (2026-10-06)
+
+Storage moved from the local SQLite file to the Neon database the deployment
+reads, on both ends of the pipeline.
+
+What changed:
+
+- `prog5/config.py` resolves settings through `env_value()`: a real environment
+  variable first, then the optional gitignored `Prog5/.env`, then the built-in
+  default. `PROG5_ENV_FILE` relocates that file and an absent file changes
+  nothing, so a clean checkout behaves exactly as before.
+- `Prog5/.env` (untracked; matched by the root `.gitignore` entry `.env`) now
+  holds `PROG5_DATABASE_URL`, which removes the earlier dependence on `setx`
+  plus a fresh logon for the Task Scheduler job.
+- `Prog5/.env.example` documents the four accepted names and the URL prefixes
+  that switch storage over.
+- `tests/conftest.py` gained an autouse fixture that points `PROG5_ENV_FILE` at
+  a nonexistent file and removes the four Postgres variables, and `temp_db`
+  now asserts `config.database_url() is None`. Without that guard the suite
+  would have written to the production Neon database on any machine carrying
+  this `.env`.
+- `tests/test_config.py` (8 cases) covers file loading, precedence, empty
+  values, comments, quotes, `export` lines, and SQLite URLs not counting as
+  Postgres.
+
+Verified by running:
+
+- `python -m pytest -q` from `Prog5/`: 72 passed, exit 0, with the live `.env`
+  present the whole time.
+- With all four `*DATABASE_URL*` variables deleted from the shell, `python -m
+  prog5.cli refresh --symbols TLKM` printed `refresh run #8 status=completed`
+  and `prices stored=1204 indicator rows stored=1204 predictions=5`; the
+  SQLite file kept the previous day's newest run (#9) and unchanged row counts,
+  so no write went to it.
+- `GET /api/v1/health` on this host returned `"storage_backend":"postgresql"`,
+  12,048 price rows, 12,048 indicator rows, 100 predictions, last run #8.
+- `GET https://pokonya-lulus.vercel.app/api/v1/health` returned the same
+  `last_run` object, identical down to `started_at 2026-10-05T21:48:54.608338`
+  and `summary prices=1204 indicators=1204 predictions=5 warnings=1`, also
+  `postgresql`. One database is now the single source of truth for the laptop
+  and the deployment, and the alias answers without Vercel Authentication.
+- Dashboard footer in the served UI: "Stored in PostgreSQL", 12,048 price
+  rows, 12,048 indicator rows, 100 predictions, last refresh #8 completed.
+
+The GitHub Actions writer was then triggered for the first time, which closes
+the secret question:
+
+- `workflow_dispatch` on `36eb986` produced run 37379910888 (2026-10-06 05:02
+  WIB) and finished success in 2m39s; every step passed, including "Refuse to
+  run without the Neon connection string", so `secrets.DATABASE_URL` is set.
+- Step 6's log line shows `DATABASE_URL: ***`, ten Yahoo Finance fetches, then
+  `refresh run #9 status=completed` and `prices stored=12038 indicator rows
+  stored=12038 predictions=50`.
+- Log text cannot prove which engine served that write, so it was cross
+  checked against the database: Neon holds run #9 with the same window
+  (`22:04:33.419344` to `22:05:15.215378`), all ten symbols, and
+  `prices=12038 indicators=12038 predictions=50 warnings=10`, and the deployed
+  `/api/v1/health` returns that same row with `"storage_backend":"postgresql"`.
+  The runner wrote to the shared Postgres, not to its own SQLite file.
+
+Still open: whether the historical SQLite file should stay in the Vercel image
+once the seed is no longer needed.
+
+## 15. Trading-day targets and a second refresh slot (2026-10-06)
+
+Three requests drove this pass: horizons must be trading-day based, the
+prediction card must show the interval between the data date and the predicted
+date, and data refreshments were still not always updated.
+
+Horizons count trading sessions, so a horizon alone did not tell a reader when
+the prediction lands: T+10 from Tuesday 6 October 2026 lands on Tuesday 20
+October 2026 because two weekends sit in between.
+
+What changed:
+
+- `prog5/trading_calendar.py` projects the calendar date: `target_date(
+  data_as_of, H)` walks H weekdays forward, Friday + 1 is Monday, H=0 returns
+  the start date, and the walk never lands on a weekend. Exchange holidays are
+  not modeled; the freshness label already absorbs them.
+- `Prediction.target_date` (nullable Date) is stored per row. `db.init_db()`
+  adds the column to existing databases with an `ALTER TABLE ... ADD COLUMN`
+  when missing and rows predating it keep NULL until refreshed again.
+- The refresh report, the API schema, and the upsert all carry `target_date`.
+- The dashboard's prediction card replaces "Input window" with "Output
+  window": the interval from the data date to the predicted date, labeled with
+  the session count and "weekends skipped". The prediction-history table gained
+  a Target column.
+- Refresh reliability: `PROG5_SCHEDULE_TIMES` now defaults to `17:30,21:00`,
+  the Windows installer registers a second task at 21:05, the workflow gained a
+  14:00 UTC (21:00 WIB) cron, and the scheduled runner re-reads
+  `PROG5_DATABASE_URL` from the user registry every tick so `setx` applies
+  without a fresh logon. A 21:00 run satisfies both slots for the day, and the
+  concurrency group keeps writers from overlapping.
+
+Verified by running:
+
+- `python -m pytest -q` from `Prog5/`: 81 passed (72 before, plus 8 calendar
+  tests and the target-date pipeline test), exit 0.
+- A real refresh of all ten tickers against Neon wrote run #10 (50
+  predictions). The report table shows the target column: ADRO T+10 rows read
+  `2026-10-06 2026-10-20`, the exact interval from the request.
+- One-off backfill of the 100 legacy rows (data_as_of 2026-10-02 and
+  2026-10-05) through the same projection function; zero NULL target dates
+  remain, and Friday 2026-10-02 + 10 sessions lands on 2026-10-16 as expected.
+- Served dashboard (127.0.0.1:8123, Postgres backend): ADRO T+10 shows
+  "Output window: 06 Oct 2026 to 20 Oct 2026, 10 sessions (weekends skipped)",
+  the history table shows Targets 20 Oct / 19 Oct / 16 Oct for data dates 06 /
+  05 / 02 Oct, and the browser console has no errors.
 
 ## antislop Delivery Gate
 

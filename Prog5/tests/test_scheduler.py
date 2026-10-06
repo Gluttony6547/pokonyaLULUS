@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import time
 from datetime import date, datetime, time as clock_time, timedelta, timezone
 from pathlib import Path
@@ -9,7 +10,7 @@ from types import SimpleNamespace
 import pandas as pd
 import pytest
 
-from prog5 import cli, config, refresh as refresh_module, scheduler
+from prog5 import cli, config, db, refresh as refresh_module, scheduler
 from prog5.models import RefreshRun
 
 from .conftest import requires_artifacts
@@ -62,6 +63,35 @@ def test_due_slot_respects_time_and_weekday():
     slot = scheduler.due_slot(after, None, times, WEEKDAYS)
     assert slot is not None
     assert (slot.date(), slot.strftime("%H:%M")) == (monday, "17:30")
+
+
+def test_scheduled_run_migrates_a_legacy_database_before_the_due_check(tmp_path, monkeypatch):
+    legacy = tmp_path / "legacy.sqlite3"
+    con = sqlite3.connect(legacy)
+    con.execute(
+        "create table stocks (symbol text primary key, is_research_ticker boolean, "
+        "created_at text, updated_at text)"
+    )
+    con.commit()
+    con.close()
+    monkeypatch.setenv("PROG5_DB_PATH", str(legacy))
+    monkeypatch.setenv("PROG5_SCHEDULE_DAYS", "mon,tue,wed,thu,fri")
+    monkeypatch.setenv("PROG5_SCHEDULE_TIMES", "17:30")
+    db.clear_caches()
+
+    # Monday 16:00 local: the 17:30 slot has not arrived, so nothing runs.
+    before_slot = utc_naive(datetime(2026, 10, 5, 16, 0))
+    try:
+        outcome = scheduler.run_scheduled(now_utc=before_slot)
+    finally:
+        db.clear_caches()
+
+    assert outcome.ran is False
+    assert outcome.reason == "not due"
+    con = sqlite3.connect(legacy)
+    names = {row[0] for row in con.execute("select name from sqlite_master where type='table'")}
+    con.close()
+    assert "prog5_stocks" in names and "stocks" not in names
 
 
 def test_a_completed_run_satisfies_the_slot():
