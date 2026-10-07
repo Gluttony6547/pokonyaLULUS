@@ -1,3 +1,0 @@
--r requirements-dev.txt
-scipy>=1.13,<2
-xgboost>=2.1,<4

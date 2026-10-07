@@ -5,11 +5,6 @@ __pycache__
 *.py[cod]
 Prog5/tests
 Prog5/prog5/prog5
-data/stock_signal.db
-requirements-dev.txt
-requirements-training.txt
-test_suite.py
-training_engine.py
 2026053141-1.pdf
 Prompt.md
 Prompt_Mermaid.md
