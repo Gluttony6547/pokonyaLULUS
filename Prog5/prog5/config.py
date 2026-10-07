@@ -135,6 +135,7 @@ def artifact_dir() -> Path:
     return _resolve(
         "PROG5_ARTIFACT_DIR",
         [
+            REPOSITORY_DIR / "models",
             PROJECT_DIR / "models",
             REPOSITORY_DIR / "CODE" / "Price Prediction Model",
         ],

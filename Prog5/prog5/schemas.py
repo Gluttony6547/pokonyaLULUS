@@ -82,3 +82,4 @@ class HealthOut(BaseModel):
     prediction_rows: int
     artifacts: dict[str, int]
     last_run: RunOut | None
+    last_successful_refresh: str | None

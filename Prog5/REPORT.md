@@ -414,6 +414,58 @@ Verified by running:
   the history table shows Targets 20 Oct / 19 Oct / 16 Oct for data dates 06 /
   05 / 02 Oct, and the browser console has no errors.
 
+## 16. One repository, and a freshness fact the dashboard can read (2026-10-07)
+
+The work was split across two repositories with unrelated histories.
+`tugasakhir` held Prog3, Prog4, the Vercel serverless entrypoint, and the CODE
+clone; `pokonyaLULUS` held only the Prog5 service and the container deployment.
+Every improvement had to be made twice or copied by hand, which is what made
+the earlier freshness and horizon fixes drift apart between the two.
+
+What changed:
+
+- `pokonyaLULUS` is now the single source of truth. This checkout sits on top of
+  its `main`, at the same paths the deployment builds from, so one edit lands
+  once.
+- The Prog5 freshness work moved across: `RefreshTelemetry`
+  (`prog5_refresh_telemetry`, one row per source and key) is written by the
+  refresh pipeline when a run stores predictions, and read by
+  `GET /api/v1/health` as `last_successful_refresh`. That answers "when was the
+  data last refreshed", which a run's `started_at` cannot: a run can start and
+  then fail.
+- Cleanup on the way across: the telemetry write no longer wraps itself in a
+  savepoint whose `except` called `session.rollback()`. That call discarded the
+  enclosing transaction, including the `RefreshRun` completion the scheduler's
+  due check reads, so one telemetry hiccup could have made a finished weekday
+  run look unfinished and never satisfied.
+- `config.artifact_dir()` gained `REPOSITORY_DIR/models` as its first
+  candidate. The deployed layout keeps the 50 `.h5` files at the repository
+  root, and the old `REPOSITORY_DIR/CODE/Price Prediction Model` fallback is not
+  part of this repository, so an unflagged scheduled run on this host resolved
+  no artifacts and stored no predictions.
+- The flattened Prog3 copy at the repository root is gone: the container runs
+  `prog5.api:app` and never imported those modules, so they were build surface
+  and reading surface with no runtime role.
+- One documented gap closed in passing: the two repositories disagreed about
+  what `Prog5/.gitignore` protects. The version kept here tracks
+  `Prog5/data/prog5.sqlite3`, because `Dockerfile` copies it as the snapshot
+  that seeds an empty Neon database; a blanket `data/` rule would have made the
+  image build fail.
+
+Verified by running:
+
+- `python -m pytest -q` from `Prog5/`: 81 passed, exit 0.
+- A throwaway SQLite database, never the deployed Neon one: two writes through
+  `storage.record_successful_refresh` leave exactly one row with `success_at`
+  holding the newer value, and `GET /api/v1/health` answers 200 with
+  `last_successful_refresh` set to that value.
+- `config.artifact_dir()` resolves to `<repo>/models` with no environment
+  variable set, and `test_predict_price_reproduces_the_last_research_window`
+  runs rather than skipping.
+- The weekday writer is evidenced, not asserted: run #2 of "Prog5 daily
+  refresh" (`schedule`) completed with conclusion `success` on 2026-10-06, and
+  that job exits non-zero when the `DATABASE_URL` secret is absent.
+
 ## antislop Delivery Gate
 
 Block 1, Hard Gate (all "no" by design):

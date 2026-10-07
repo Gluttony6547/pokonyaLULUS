@@ -16,6 +16,7 @@ from . import __version__, config, db
 from .indicators import INDICATOR_COLUMNS
 from .model_registry import artifact_inventory
 from .models import Prediction, RefreshRun, Stock, StockPrice, TechnicalIndicator
+from .storage import last_successful_refresh_at
 from .schemas import HealthOut, PredictionOut, PriceResponse, PriceRow, RunOut, StockOut
 
 DESCRIPTION = (
@@ -65,6 +66,9 @@ def health(session: Session = Depends(get_session)) -> HealthOut:
     last_run = session.scalars(
         select(RefreshRun).order_by(RefreshRun.id.desc()).limit(1)
     ).first()
+    last_successful_refresh = last_successful_refresh_at(
+        session, "refresh", "last_completed"
+    )
     return HealthOut(
         status="ok",
         version=__version__,
@@ -76,6 +80,7 @@ def health(session: Session = Depends(get_session)) -> HealthOut:
         prediction_rows=session.scalar(select(func.count()).select_from(Prediction)) or 0,
         artifacts=artifact_inventory(),
         last_run=RunOut.model_validate(last_run) if last_run else None,
+        last_successful_refresh=last_successful_refresh.isoformat() if last_successful_refresh else None,
     )
 
 

@@ -11,7 +11,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from .indicators import INDICATOR_COLUMNS
-from .models import Prediction, Stock, StockPrice, TechnicalIndicator
+from .models import Prediction, RefreshTelemetry, Stock, StockPrice, TechnicalIndicator
 
 
 def _insert(session: Session, model):
@@ -133,4 +133,28 @@ def latest_price_date(session: Session, symbol: str) -> date | None:
         .where(StockPrice.symbol == symbol)
         .order_by(StockPrice.price_date.desc())
         .limit(1)
+    )
+
+
+def record_successful_refresh(
+    session: Session, source: str, key: str, success_at: datetime | None
+) -> None:
+    """Upsert the single telemetry row for (source, key)."""
+    statement = _insert(session, RefreshTelemetry).values(
+        source=source, key=key, success_at=success_at
+    )
+    session.execute(
+        statement.on_conflict_do_update(
+            index_elements=["source", "key"],
+            set_={"success_at": success_at, "updated_at": _utcnow()},
+        )
+    )
+
+
+def last_successful_refresh_at(session: Session, source: str, key: str) -> datetime | None:
+    """When the (source, key) refresh last completed, or None if it never has."""
+    return session.scalar(
+        select(RefreshTelemetry.success_at).where(
+            RefreshTelemetry.source == source, RefreshTelemetry.key == key
+        )
     )

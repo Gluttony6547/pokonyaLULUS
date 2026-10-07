@@ -121,3 +121,26 @@ class Prediction(Base):
     target_scale: Mapped[float] = mapped_column(Float, nullable=False)
     warnings: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
+
+
+class RefreshTelemetry(Base):
+    """One row per (source, key) recording when that refresh last succeeded.
+
+    The dashboard reads this to answer "when was the data last refreshed",
+    which is not the same question as "when did a run last start": a run can
+    start and then fail. The scheduler's due check still reads `RefreshRun`,
+    which carries the run status this table does not.
+    """
+
+    __tablename__ = "prog5_refresh_telemetry"
+    __table_args__ = (
+        UniqueConstraint(
+            "source", "key", name="uq_prog5_refresh_telemetry_source_key"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    key: Mapped[str] = mapped_column(String(64), nullable=False)
+    success_at: Mapped[datetime | None] = mapped_column(DateTime)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)

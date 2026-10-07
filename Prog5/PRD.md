@@ -46,8 +46,9 @@ a working light/dark theme, without any new backend behavior.
 | R11 | Keyboard reachable and operable with a visible focus ring | Tab walks every control; Enter activates; skip link jumps to #main |
 | R12 | No fabricated numbers, testimonials, or claims; every displayed number comes from the DB or the artifacts | All figures trace to `/api/v1` payloads; footer states the source and the not-advice caveat |
 | R13 | Unattended refresh on a configurable schedule, safe against overlapping and interrupted runs, with configurable retries, runnable on Windows without Docker | Implemented; live trigger produced run #6 `kind=scheduled` with unchanged row counts, lock refused a second writer, and tests cover due time, retries, lock, and interruption (REPORT.md section 11) |
-| R14 | PostgreSQL/Neon persistence for deployment; keep local SQLite for development | SQLAlchemy selects Neon from `DATABASE_URL`; Prog5 tables use a `prog5_` prefix to coexist with the existing application; the bundled snapshot seeds an empty Neon database once, and manual import remains idempotent |
+| R14 | PostgreSQL/Neon persistence for deployment; keep local SQLite for development | SQLAlchemy selects Neon from `DATABASE_URL`; Prog5 tables use a `prog5_` prefix to coexist with the existing application; snapshot import is idempotent |
 | R15 | Deployment image includes only the 50 LSTM models and research data required to reproduce the advertised model outputs | All 50 LSTM SHA-256 digests match the CODE source; GRU/RNN models, training workbooks, notebooks, and raw data are not runtime dependencies |
+| R16 | The deployed database keeps receiving new closes on IDX trading days without a manual CLI run | Both writers are live: the Actions schedule completed a scheduled run on 2026-10-06 with the `DATABASE_URL` secret present, and the operator host's Task Scheduler tasks catch up any slot the runner misses (REPORT.md sections 13 and 16) |
 
 ## Data contract (existing endpoints only)
 
@@ -77,5 +78,6 @@ there is no second data path.
 - Coverage is complete as of 2026-10-04: all ten tickers and all five horizons are stored (REPORT.md section 10).
 - Add browser-level tests (currently one static-serving pytest, the rest are
   manual browser checks recorded in REPORT.md).
-- Scheduler is implemented and proven (REPORT.md section 11); keep the host process alive so the freshness badge does not drift to Stale.
-- Production deployment must have the Neon `DATABASE_URL` set. On first startup, an empty Neon database is seeded from the bundled Prog5 snapshot; subsequent Vercel instances use PostgreSQL and do not rely on local disk persistence.
+- Scheduler is implemented, installed as "Prog5 daily refresh" (weekdays 17:35 and 21:05, REPORT.md section 13), and proven; the Actions `DATABASE_URL` secret and the operator host's `PROG5_DATABASE_URL` are both in place, so the freshness badge tracks real closes.
+- Production deployment must have the Neon `DATABASE_URL` set and the initial Prog5 snapshot imported; new Vercel instances cannot rely on local disk persistence.
+- `GET /api/v1/health` reports `last_successful_refresh`, the newest window that finished storing predictions. It answers "when was the data last refreshed", which a run's `started_at` cannot: a run can start and then fail.

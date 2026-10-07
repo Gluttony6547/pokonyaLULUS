@@ -4,5 +4,6 @@ __pycache__/
 data/prog5.sqlite3-wal
 data/prog5.sqlite3-shm
 data/*.lock
+data/scheduler.log
 /prog5/prog5/
 /tests/tests/
