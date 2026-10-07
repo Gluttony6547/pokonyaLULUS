@@ -21,7 +21,7 @@ The dashboard is at `/`, API docs at `/docs`, and health at `/api/v1/health`. Wi
 
 ## Neon and production
 
-Set `DATABASE_URL` to Neon's pooled connection string for the running service. Keep the direct URL out of deployment runtime; use it only for one-time administration or bulk snapshot import. At startup Prog5 creates its additive tables with a `prog5_` prefix, leaving the existing application's tables untouched.
+Set `DATABASE_URL` to Neon's pooled connection string for the running service. Keep the direct URL out of deployment runtime; use it only for one-time administration or bulk snapshot import. At startup Prog5 creates its additive tables with a `prog5_` prefix, leaving any pre-existing tables untouched.
 
 An empty production database is seeded at first startup from the reviewed
 snapshot bundled in `Prog5/data/prog5.sqlite3`. Existing data is never replaced.
@@ -51,7 +51,7 @@ python -m prog5.cli inventory
 python -m prog5.cli verify
 ```
 
-GitHub Actions runs both the existing application checks and the Prog5 test, artifact replication, and Docker build checks. The linked Vercel project deploys its container from `main`.
+GitHub Actions runs the Prog5 tests, the artifact replication check, and both container builds. The linked Vercel project deploys its container from `main`.
 
 ## Product and engineering decisions
 

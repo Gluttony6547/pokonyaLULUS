@@ -368,7 +368,7 @@ scripts/                 Windows Task Scheduler runner and one-command installer
 ```powershell
 cd Prog5
 python -m pip install -r requirements-dev.txt
-python -m pytest -q                       # 72 tests
+python -m pytest -q                       # 81 tests
 python -m prog5.cli inventory             # artifact check per ticker
 python -m prog5.cli verify --symbols ADRO # replication against research CSVs
 python -m prog5.cli refresh --symbols ADRO,BMRI
