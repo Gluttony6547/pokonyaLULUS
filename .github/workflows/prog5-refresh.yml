@@ -2,18 +2,15 @@ name: Prog5 daily refresh
 
 # Unattended writer for the deployed dashboard. It runs the same
 # prog5.refresh.refresh pipeline the CLI uses against the Neon database the
-# Vercel app reads, so the served card stops drifting one trading day behind.
-# The job refuses to run when the DATABASE_URL secret is missing, because the
-# pipeline would otherwise write to the runner's throwaway SQLite file and
-# report success while the deployed site stayed frozen.
+# Vercel app reads. GitHub drops scheduled runs under load, so the evening is
+# covered by a dense window of cheap attempts instead of one or two slots:
+# each attempt first compares the deployed site with Yahoo and skips the model
+# install once the two agree, and the last step fails the run when the site
+# still trails Yahoo after the pipeline has run.
 on:
   schedule:
-    # Two slots per trading day. Yahoo's EOD update for IDX names usually
-    # lands by 17:30 WIB but sometimes drifts later, so the evening slot
-    # re-runs the pipeline and fills any gap. The concurrency group keeps
-    # the two writers from overlapping.
-    - cron: "45 10 * * 1-5"  # 17:45 WIB, after the afternoon host tick
-    - cron: "0 14 * * 1-5"   # 21:00 WIB, catches late Yahoo EOD updates
+    - cron: "22 1 * * 1-5"       # 08:22 WIB repair pass for a missed evening
+    - cron: "7,37 10-16 * * 1-5" # 17:07-23:37 WIB, every 30 min off the hour
   workflow_dispatch:
 
 permissions:
@@ -44,9 +41,24 @@ jobs:
           cache: pip
           cache-dependency-path: Prog5/requirements.txt
 
-      - name: Refuse to run without the Neon connection string
+      - name: Decide whether a refresh is needed
+        id: due
+        # A manual dispatch always refreshes; a scheduled attempt skips the
+        # install when the site already matches Yahoo's completed sessions.
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] \
+            || ! python Prog5/scripts/check_site_freshness.py; then
+            echo "stale=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "stale=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Refuse to refresh without the Neon connection string
+        if: steps.due.outputs.stale == 'true'
         env:
           CONNECTION: ${{ secrets.DATABASE_URL }}
+        # Without the secret the pipeline would write to the runner's throwaway
+        # SQLite file and report success while the deployed site stayed frozen.
         run: |
           if [ -z "$CONNECTION" ]; then
             echo "::error::Add the DATABASE_URL repository secret (Neon pooled connection string), otherwise the refresh only writes to the runner."
@@ -54,13 +66,18 @@ jobs:
           fi
 
       - name: Install runtime dependencies
+        if: steps.due.outputs.stale == 'true'
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-torch-cpu.txt
           python -m pip install -r Prog5/requirements.txt
 
       - name: Refresh all ten tickers through the one pipeline
+        if: steps.due.outputs.stale == 'true'
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           python -m prog5.cli refresh --symbols ADRO,ANTM,BMRI,BNGA,EXCL,INCO,INKP,MEDC,PGAS,TLKM
+
+      - name: Fail when the site still trails Yahoo
+        run: python Prog5/scripts/check_site_freshness.py

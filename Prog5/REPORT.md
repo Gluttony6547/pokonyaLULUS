@@ -466,6 +466,62 @@ Verified by running:
   refresh" (`schedule`) completed with conclusion `success` on 2026-10-06, and
   that job exits non-zero when the `DATABASE_URL` secret is absent.
 
+## 17. Autonomous refresh, an honest badge, and a protected completion (2026-10-08)
+
+GitHub produced zero runs for both old cron entries (`45 10 * * 1-5`,
+`0 14 * * 1-5`) on 2026-10-07, so the deployed Neon database silently stopped
+moving. The workflow was redesigned to tolerate drops rather than trust any
+single firing:
+
+- Schedule: `7,37 10-16 * * 1-5` (17:07-23:37 WIB, minutes off the hour where
+  GitHub drops least) plus a `22 1 * * 1-5` repair pass (08:22 WIB). Any one
+  surviving firing keeps the data current; the repair pass covers a whole
+  lost evening.
+- A guard step runs `Prog5/scripts/check_site_freshness.py` first (stdlib
+  only, compares stored closes to Yahoo, applies the 17:30 WIB cutoff so a
+  forming intraday bar never counts as due). Fresh means the refresh steps are
+  skipped; behind means they run; an unreadable comparison fails the job
+  instead of writing on bad evidence. Manual dispatch always refreshes.
+- The same guard runs again as the final step, so a run that completed but
+  still trails Yahoo fails loudly rather than reporting green.
+- Missing `DATABASE_URL` still refuses before any work, unchanged.
+
+The freshness badge in `prog5/static/app.js` was age-only, which called a
+Tuesday-morning dashboard "Fresh" on Monday's close. It is now session-aware:
+`expectedCloseDate()` walks back from the current WIB time past the 17:30
+cutoff and weekends to the close that *should* be stored, and the badge shows
+Behind when the stored date trails it, Stale past 10 days, Fresh within 3
+days, Older otherwise; the tooltip names the expected close. The guard cutoff
+and the badge cutoff are the same rule on both sides of the wire.
+
+The telemetry write in `prog5/refresh.py` gained a savepoint regression
+guard: `record_successful_refresh` runs inside `session.begin_nested()`, and a
+failure there is caught, logged, and appended to `report.warnings` after the
+run row has already been committed, so a telemetry hiccup can no longer
+discard a finished run's completion marker. `test_a_telemetry_failure_keeps_the_completed_run`
+reproduces the old failure and asserts the run stays completed.
+
+Windows Task Scheduler was the other half of autonomy: both registered tasks
+were exported, their XML hardened (battery and idle stops off,
+`StartWhenAvailable`, `WakeToRun`), re-registered, and verified by re-export.
+`scripts/install-windows-task.cmd` now applies the same settings after each
+`schtasks /create`, so a re-install cannot reintroduce the `0x800710E0`
+battery refusal that silently skipped runs.
+
+Verified by running:
+
+- `python -m pytest -q` from `Prog5/`: 82 passed, exit 0 (was 81).
+- `python Prog5/scripts/check_site_freshness.py` against the live site:
+  10 tickers fresh, exit 0; the same script at 09:29 WIB without the cutoff
+  reported "behind", proving the cutoff is what makes the verdict honest.
+- Badge branches exercised in a browser against the tracked seed database
+  with a fixed clock: Fresh, Behind, and Stale all render, and no em dash
+  appears in `prog5/static/`.
+- Both scheduled tasks re-export with `DisallowStartIfOnBatteries=false`,
+  `StopIfGoingOnBatteries=false`, `StopOnIdleEnd=false`,
+  `StartWhenAvailable=true`, `WakeToRun=true`, and the installer re-run keeps
+  them.
+
 ## antislop Delivery Gate
 
 Block 1, Hard Gate (all "no" by design):

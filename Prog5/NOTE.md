@@ -218,12 +218,20 @@ the deployed card froze at the snapshot's 2026-10-02 closes until a writer ran
 against the same Neon database. Two writers cover that now:
 
 - GitHub Actions: `.github/workflows/prog5-refresh.yml` runs
-  `python -m prog5.cli refresh` for all ten tickers twice on weekdays, at
-  17:45 and 21:00 WIB (10:45 and 14:00 UTC). The concurrency group keeps the
-  two runs from overlapping. It refuses to run when the `DATABASE_URL`
-  repository secret is missing, so a misconfigured run fails loudly instead of
-  writing to the runner's throwaway SQLite file. The secret is added once under
-  Settings, Secrets and variables, Actions.
+  `python -m prog5.cli refresh` for all ten tickers across a dense weekday
+  window: every 30 minutes from 17:07 to 23:37 WIB, minutes offset from the
+  hour because GitHub drops queued runs most at the start of one, plus an
+  08:22 WIB repair pass for an evening that was missed entirely. Each attempt
+  runs `scripts/check_site_freshness.py` first: it compares the deployed site
+  with Yahoo's completed sessions (before 17:30 WIB the still-forming daily
+  bar does not count) and skips the model install once they agree, so a quiet
+  evening costs a handful of cheap checks instead of a dozen full refreshes.
+  The last step runs the same script again and fails the run when the site
+  still trails Yahoo, which turns a dropped schedule into a red badge. It
+  refuses to refresh when the `DATABASE_URL` repository secret is missing, so
+  a misconfigured run fails loudly instead of writing to the runner's
+  throwaway SQLite file. The secret is added once under Settings, Secrets and
+  variables, Actions.
 
 Live proof (2026-10-06, GitHub runner, WIB):
 

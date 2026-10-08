@@ -240,10 +240,8 @@ def _refresh_locked(
                     report.warnings.append(message)
                     continue
 
-                # The input window is the last `horizon` rows of session data,
-                # not a calendar slice. frame["date"] is already trading-day
-                # ordered from fetch_daily_ohlcv, so the first of those H rows
-                # is the window start and the last is data_as_of.
+                # Session rows, not a calendar slice: frame["date"] is already trading-day
+                # ordered, so the first of the last H rows is the window start.
                 window_start = frame["date"].iloc[-horizon]
 
                 identity = model_identity(symbol, horizon)
@@ -289,16 +287,22 @@ def _refresh_locked(
         report.status = "completed" if report.predictions else "failed"
         run.status = report.status
         run.finished_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        # Only completed runs write the freshness fact, so a failed run leaves the
+        # last usable value in place for the header.
+        if report.status == "completed":
+            try:
+                # A savepoint absorbs a telemetry failure without discarding the run.
+                with session.begin_nested():
+                    record_successful_refresh(
+                        session, "refresh", "last_completed", run.finished_at
+                    )
+            except Exception:
+                logger.exception("Telemetry write failed; refresh run #%s stays completed", run.id)
+                report.warnings.append("telemetry: completion marker not recorded")
+
         run.summary = (
             f"prices={report.prices_stored} indicators={report.indicators_stored} "
             f"predictions={len(report.predictions)} warnings={len(report.warnings)}"
         )
-
-        # Record the freshness fact the dashboard reads. A run that stored no
-        # predictions leaves the previous value in place, so the header keeps
-        # reporting the last window that was actually usable.
-        if report.status == "completed":
-            record_successful_refresh(
-                session, "refresh", "last_completed", run.finished_at
-            )
     return report

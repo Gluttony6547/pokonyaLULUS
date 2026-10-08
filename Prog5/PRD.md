@@ -35,7 +35,7 @@ a working light/dark theme, without any new backend behavior.
 | --- | --- | --- |
 | R1 | Served by the same FastAPI process at `/` and `/app`, no separate server, no new endpoint | Local smoke check confirms both paths serve the same UI; the UI fetches only existing read endpoints |
 | R2 | Latest prediction shows predicted price, last close, return %, signal, threshold %, `data_as_of`, model file, SHA-256, OOD z and flag | Seen on all ten tickers at T+1 plus spot checks at T+50; matches API payloads (REPORT.md section 10) |
-| R3 | A freshness badge derived from `data_as_of` (Fresh <= 3 days, Older <= 10, Stale beyond) | Fresh on live data; Older and Stale exercised on a temp DB copy |
+| R3 | A freshness badge derived from `data_as_of` and the expected session: Fresh when the last closed IDX session (past 17:30 WIB) is stored, Behind when it is not, Older at 4-10 days with no session missing, Stale beyond 10 | Fresh on live data before the close; Fresh/Behind/Stale called in the browser with fixed clocks; Older is unreachable while the session walk holds (REPORT.md section 17) |
 | R4 | OOD warning block when `ood_flag` is true, text explains it is a warning, not a fix | Live on ANTM, BNGA, MEDC, TLKM in the 2026-10-04 refresh; also exercised on a temp DB copy |
 | R5 | Enough history to be useful: price chart (180 stored sessions), indicator chips, prediction-history table, refresh-run list | Seen on first load and after selection changes |
 | R6 | Honest empty state for a research ticker with no stored rows, naming the exact refresh command | Verified on TLKM before it was populated (REPORT.md section 4) |
@@ -78,6 +78,6 @@ there is no second data path.
 - Coverage is complete as of 2026-10-04: all ten tickers and all five horizons are stored (REPORT.md section 10).
 - Add browser-level tests (currently one static-serving pytest, the rest are
   manual browser checks recorded in REPORT.md).
-- Scheduler is implemented, installed as "Prog5 daily refresh" (weekdays 17:35 and 21:05, REPORT.md section 13), and proven; the Actions `DATABASE_URL` secret and the operator host's `PROG5_DATABASE_URL` are both in place, so the freshness badge tracks real closes.
+- Scheduler is implemented, installed as "Prog5 daily refresh" (weekdays 17:35 and 21:05, REPORT.md section 13), and proven; the Actions workflow now attempts every 30 minutes on weekday evenings plus a morning repair pass, skipping attempts whose data already matches Yahoo and failing when it does not (REPORT.md section 17). The Actions `DATABASE_URL` secret and the operator host's `PROG5_DATABASE_URL` are both in place, so the freshness badge tracks real closes.
 - Production deployment must have the Neon `DATABASE_URL` set and the initial Prog5 snapshot imported; new Vercel instances cannot rely on local disk persistence.
 - `GET /api/v1/health` reports `last_successful_refresh`, the newest window that finished storing predictions. It answers "when was the data last refreshed", which a run's `started_at` cannot: a run can start and then fail.

@@ -15,6 +15,13 @@ if not exist "%RUNNER%" (
 
 echo Registering "%TASK_AM%" ...
 schtasks /create /f /tn "%TASK_AM%" /sc weekly /d MON,TUE,WED,THU,FRI /st 17:35 /tr "\"%RUNNER%\""
+rem Drop the battery and idle defaults that stop weekday runs (0x800710E0).
+powershell -NoProfile -Command "$ErrorActionPreference='Stop'; $s=(Get-ScheduledTask -TaskName '%TASK_AM%').Settings; $s.DisallowStartIfOnBatteries=$false; $s.StopIfGoingOnBatteries=$false; $s.StartWhenAvailable=$true; $s.WakeToRun=$true; $s.IdleSettings.StopOnIdleEnd=$false; Set-ScheduledTask -TaskName '%TASK_AM%' -Settings $s | Out-Null"
+if errorlevel 1 (
+  echo.
+  echo Could not harden "%TASK_AM%". Re-run from a normal user terminal.
+  exit /b 1
+)
 if errorlevel 1 (
   echo.
   echo Could not register the task. Run this script from a normal user terminal.
@@ -23,6 +30,12 @@ if errorlevel 1 (
 
 echo Registering "%TASK_PM%" ...
 schtasks /create /f /tn "%TASK_PM%" /sc weekly /d MON,TUE,WED,THU,FRI /st 21:05 /tr "\"%RUNNER%\""
+powershell -NoProfile -Command "$ErrorActionPreference='Stop'; $s=(Get-ScheduledTask -TaskName '%TASK_PM%').Settings; $s.DisallowStartIfOnBatteries=$false; $s.StopIfGoingOnBatteries=$false; $s.StartWhenAvailable=$true; $s.WakeToRun=$true; $s.IdleSettings.StopOnIdleEnd=$false; Set-ScheduledTask -TaskName '%TASK_PM%' -Settings $s | Out-Null"
+if errorlevel 1 (
+  echo.
+  echo Could not harden "%TASK_PM%". Re-run from a normal user terminal.
+  exit /b 1
+)
 if errorlevel 1 (
   echo.
   echo Could not register the evening task. Run this script from a normal user terminal.

@@ -74,21 +74,43 @@ function fmtDateTime(iso) {
   return date.toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-function daysSince(iso) {
+function daysSince(iso, nowMs = Date.now()) {
   const then = Date.parse(`${iso}T00:00:00Z`);
-  return Math.max(0, Math.floor((Date.now() - then) / 86400000));
+  return Math.max(0, Math.floor((nowMs - then) / 86400000));
 }
 
-function freshness(iso) {
-  const age = daysSince(iso);
+// IDX closes at 16:00 WIB and Yahoo's daily row lands by about 17:30 WIB, so
+// a session only becomes expected once that clock has passed.
+function expectedCloseDate(nowMs = Date.now()) {
+  const wib = new Date(nowMs + 7 * 3600000);
+  const today = Date.UTC(wib.getUTCFullYear(), wib.getUTCMonth(), wib.getUTCDate());
+  const weekday = wib.getUTCDay();
+  const closedToday =
+    weekday >= 1 && weekday <= 5 && wib.getUTCHours() * 60 + wib.getUTCMinutes() >= 17 * 60 + 30;
+  let expected = closedToday ? today : today - 86400000;
+  for (;;) {
+    const walk = new Date(expected).getUTCDay();
+    if (walk !== 0 && walk !== 6) break;
+    expected -= 86400000;
+  }
+  return new Date(expected).toISOString().slice(0, 10);
+}
+
+function freshness(iso, nowMs = Date.now()) {
+  const age = daysSince(iso, nowMs);
   const label = age === 0 ? "today" : age === 1 ? "1 day old" : `${age} days old`;
+  const expected = expectedCloseDate(nowMs);
+  const behind = iso < expected;
+  if (age > 10) {
+    return { cls: "bad", label: "Stale", ageText: label, expected, behind };
+  }
+  if (behind) {
+    return { cls: "warn", label: "Behind", ageText: label, expected, behind };
+  }
   if (age <= 3) {
-    return { cls: "ok", label: "Fresh", ageText: label };
+    return { cls: "ok", label: "Fresh", ageText: label, expected, behind };
   }
-  if (age <= 10) {
-    return { cls: "warn", label: "Older", ageText: label };
-  }
-  return { cls: "bad", label: "Stale", ageText: label };
+  return { cls: "warn", label: "Older", ageText: label, expected, behind };
 }
 
 async function fetchJSON(url, signal) {
@@ -287,7 +309,7 @@ function renderPrediction(symbol, horizon, latest, prices) {
         </div>
         <div class="prediction-badges">
           <span class="signal signal-${esc(signalLabel)}"><span class="signal-dot" aria-hidden="true"></span>${esc(signalLabel)}</span>
-          <span class="freshness freshness-${fresh.cls}" title="Latest stored trading day ${esc(prediction.data_as_of)}">${fresh.label}</span>
+          <span class="freshness freshness-${fresh.cls}" title="Latest stored trading day ${esc(prediction.data_as_of)}${fresh.behind ? `; expected ${fresh.expected} close not stored yet` : ""}">${fresh.label}</span>
         </div>
       </header>
       <dl class="prediction-meta">

@@ -6,7 +6,7 @@ import pandas as pd
 
 from prog5 import config
 from prog5 import refresh as refresh_module
-from prog5.models import Prediction
+from prog5.models import Prediction, RefreshRun
 
 from .conftest import requires_artifacts
 
@@ -102,3 +102,27 @@ def test_refresh_skips_horizons_with_a_corporate_action_in_the_window(temp_db, m
     assert not report.predictions
     assert any("T1: corporate action" in warning for warning in report.warnings)
     assert any("T50: corporate action" in warning for warning in report.warnings)
+
+
+@requires_artifacts
+def test_a_telemetry_failure_keeps_the_completed_run(temp_db, monkeypatch):
+    frame = synthetic_frame()
+    monkeypatch.setattr(refresh_module, "fetch_daily_ohlcv", lambda symbol, period=None: frame.copy())
+    monkeypatch.setattr(
+        refresh_module, "predict_price", lambda symbol, horizon, closes: float(frame["close"].iloc[-1])
+    )
+
+    def telemetry_down(*args, **kwargs):
+        raise RuntimeError("telemetry store unavailable")
+
+    monkeypatch.setattr(refresh_module, "record_successful_refresh", telemetry_down)
+
+    report = refresh_module.refresh(["ADRO"], horizons=(1,))
+
+    assert report.status == "completed"
+    assert any("telemetry" in warning for warning in report.warnings)
+    with temp_db.session() as session:
+        run = session.get(RefreshRun, report.run_id)
+        assert run.status == "completed"
+        assert run.finished_at is not None
+        assert session.query(Prediction).count() == 1
