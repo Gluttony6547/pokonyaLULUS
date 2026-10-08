@@ -514,9 +514,9 @@ Verified by running:
 - `python Prog5/scripts/check_site_freshness.py` against the live site:
   10 tickers fresh, exit 0; the same script at 09:29 WIB without the cutoff
   reported "behind", proving the cutoff is what makes the verdict honest.
-- Badge branches exercised in a browser against the tracked seed database
-  with a fixed clock: Fresh, Behind, and Stale all render, and no em dash
-  appears in `prog5/static/`.
+- Badge branches exercised in a browser against the live Neon database with
+  a fixed clock: Fresh, Behind, and Stale all render, and no em dash appears
+  in `prog5/static/`.
 - Both scheduled tasks re-export with `DisallowStartIfOnBatteries=false`,
   `StopIfGoingOnBatteries=false`, `StopOnIdleEnd=false`,
   `StartWhenAvailable=true`, `WakeToRun=true`, and the installer re-run keeps
