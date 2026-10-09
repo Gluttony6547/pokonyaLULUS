@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta
 
 import pandas as pd
 
@@ -102,6 +102,60 @@ def test_refresh_skips_horizons_with_a_corporate_action_in_the_window(temp_db, m
     assert not report.predictions
     assert any("T1: corporate action" in warning for warning in report.warnings)
     assert any("T50: corporate action" in warning for warning in report.warnings)
+
+
+@requires_artifacts
+def test_refresh_stores_only_the_last_completed_session(temp_db, monkeypatch):
+    """A forming intraday bar must never be stored or predicted on."""
+    frame = synthetic_frame()
+    last_session = frame["date"].iloc[-1]
+    # Yahoo during a live session: full history plus an extra bar dated
+    # later with some unfinished price.
+    forming = pd.concat(
+        [
+            frame,
+            pd.DataFrame(
+                {
+                    "date": [last_session + pd.Timedelta(days=3)],
+                    "open": [2600.0],
+                    "high": [2620.0],
+                    "low": [2580.0],
+                    "close": [2590.0],
+                    "volume": [900_000],
+                }
+            ),
+        ],
+        ignore_index=True,
+    )
+
+    monkeypatch.setattr(refresh_module, "fetch_daily_ohlcv", lambda symbol, period=None: forming.copy())
+    # Freeze the clock inside the forming window of the extra bar. The fake
+    # subclasses datetime so constructor calls keep working.
+    frozen_moment = refresh_module._forming_since(
+        last_session + pd.Timedelta(days=3)
+    ) - refresh_module.timedelta(hours=1)
+
+    class FrozenClock(datetime):
+        @staticmethod
+        def now(tz=None):
+            return frozen_moment
+
+        def __add__(self, other):
+            return datetime.__add__(self, other)
+
+    monkeypatch.setattr(refresh_module, "datetime", FrozenClock)
+    monkeypatch.setattr(
+        refresh_module, "predict_price", lambda symbol, horizon, closes: float(frame["close"].iloc[-1])
+    )
+
+    report = refresh_module.refresh(["ADRO"], horizons=(1,))
+
+    assert report.status == "completed"  # the last closed session still predicts
+    assert any("still forming" in warning for warning in report.warnings), report.warnings
+    assert all(p["last_close"] != 2590.0 for p in report.predictions)
+    with temp_db.session() as session:
+        stored = session.query(Prediction).one()
+        assert stored.data_as_of == last_session
 
 
 @requires_artifacts

@@ -8,10 +8,11 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable, Sequence
 
+import pandas as pd
 from sqlalchemy import select
 
 from . import config, db
@@ -44,6 +45,14 @@ from .trading_calendar import target_date as project_target_date
 logger = logging.getLogger(__name__)
 
 STALE_AFTER_DAYS = 7
+
+# IDX sessions end by 16:00 WIB and Yahoo publishes the daily row sometime
+# after. A bar dated today must not be stored or predicted on until its
+# session is provably finished. 17:30 WIB on the session date is the same
+# cutoff check_site_freshness.py (and the badge) applies.
+WIB = timezone(timedelta(hours=7))
+WIB_CLOSING_HOUR = 17
+WIB_CLOSING_MINUTE = 30
 
 
 class RefreshInProgress(RuntimeError):
@@ -183,6 +192,53 @@ def refresh(
         return _refresh_locked(symbol_list, horizon_list, period, kind)
 
 
+def _forming_since(data_as_of: date) -> datetime:
+    """The WIB cutoff when the dated session's bar becomes provably closed.
+
+    Session date at 17:30 WIB; Indonesia has no DST, so the moment is
+    timezone-stable for any caller holding a UTC `now`.
+    """
+    wib_moment = datetime(
+        data_as_of.year,
+        data_as_of.month,
+        data_as_of.day,
+        WIB_CLOSING_HOUR,
+        WIB_CLOSING_MINUTE,
+        tzinfo=WIB,
+    )
+    return wib_moment.astimezone(timezone.utc)
+
+
+def bar_is_still_forming(data_as_of: date, now: datetime) -> bool:
+    """True when that session's daily bar may not be a final close yet.
+
+    A weekday bar keeps its intraday close until 17:30 WIB on the session
+    date itself. Weekend dates can never form: the market is shut, so any
+    row they carry is final. Older weekday dates are past their window and
+    final too.
+    """
+    return now < _forming_since(data_as_of) and data_as_of.weekday() < 5
+
+
+def drop_forming_bar(frame: pd.DataFrame, now: datetime) -> tuple[pd.DataFrame, list[str]]:
+    """Trim the trailing row when its session has not closed yet.
+
+    Yahoo serves the still-forming intraday bar during the trading day; its
+    close is a live price, not a final one, so storing it (and predicting from
+    it) would present an unfinished number as the closing price the dashboard
+    promises. Dropping it keeps the last *completed* session as the newest
+    row, so prices, indicators, and predictions all agree on it.
+    """
+    if frame.empty:
+        return frame, []
+    last = frame.iloc[-1]
+    if not bar_is_still_forming(last["date"], now):
+        return frame, []
+    return frame.iloc[:-1].copy(), [
+        f"{last['date']} bar is still forming; intraday close {last['close']} not stored"
+    ]
+
+
 def _refresh_locked(
     symbol_list: tuple[str, ...], horizon_list: tuple[int, ...], period: str, kind: str
 ) -> RefreshReport:
@@ -209,6 +265,9 @@ def _refresh_locked(
                 report.warnings.append(message)
                 continue
 
+            frame, forming_notes = drop_forming_bar(frame, datetime.now(timezone.utc))
+            report.warnings.extend(f"{symbol}: {note}" for note in forming_notes)
+
             for issue in validation_issues(frame):
                 report.warnings.append(f"{symbol}: {issue}")
 
@@ -232,6 +291,7 @@ def _refresh_locked(
                     logger.warning(message)
                     report.warnings.append(message)
                     continue
+
                 try:
                     predicted = predict_price(symbol, horizon, frame["close"])
                 except ModelUnavailable as error:

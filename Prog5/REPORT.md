@@ -256,9 +256,9 @@ Commands and observations, in order:
 
 - Diagnosis: the Vercel deployment (`Gluttony6547/pokonyaLULUS`) runs the
   container from `Dockerfile.vercel`, which copies `Prog5/data/prog5.sqlite3`
-  and seeds Neon only when that database is empty. Nothing writes later rows to
-  Neon, and no scheduled task existed on this host, so the deployed card stayed
-  at the snapshot's 2026-10-02 closes.
+  and seeds Neon only when that database is empty; after that, successful
+  refreshes write into the configured database, so the deployed database can
+  drift ahead of the committed snapshot. Nothing wrote later rows to Neon on 2026-10-08; by 2026-10-09, with the close of 2026-10-08 now stored and Yahoo already on 2026-10-09, the site is one trading day behind and should already be refreshing.
 - `python -m pytest -q` before the change: 63 passed, exit 0. After: 64 passed,
   3 warnings, exit 0.
 - `scripts\install-windows-task.cmd` registered "Prog5 daily refresh" for
@@ -447,10 +447,16 @@ What changed:
   `prog5.api:app` and never imported those modules, so they were build surface
   and reading surface with no runtime role.
 - One documented gap closed in passing: the two repositories disagreed about
-  what `Prog5/.gitignore` protects. The version kept here tracks
-  `Prog5/data/prog5.sqlite3`, because `Dockerfile` copies it as the snapshot
-  that seeds an empty Neon database; a blanket `data/` rule would have made the
-  image build fail.
+  `Prog5/data/prog5.sqlite3`, because `Dockerfile` copies it as the image-seed
+  snapshot for a fresh build; a blanket `data/` rule would have made the image
+  build fail. The committed snapshot holds prices from 2021-10-04 through
+  2026-10-02 (12,038 rows across all ten tickers) and predictions for
+  data_as_of 2026-10-02 only, with its latest refresh run #6 at
+  2026-10-04 13:26:32. Successful refreshes write into whatever database the
+  app is configured for at runtime - when `PROG5_DATABASE_URL` is set, that is
+  the deployed Neon database - so the live database can be ahead of this
+  committed snapshot. The deployed `GET /api/v1/health` reports
+  `last_successful_refresh` from `refresh_telemetry`, not from the seed file.
 
 Verified by running:
 
@@ -521,6 +527,57 @@ Verified by running:
   `StopIfGoingOnBatteries=false`, `StopOnIdleEnd=false`,
   `StartWhenAvailable=true`, `WakeToRun=true`, and the installer re-run keeps
   them.
+
+## 18. Forming intraday bar no longer stored as a final close (2026-10-09)
+
+The QA report (QA_REPORT.md, P1) proved the deployed API's `GET /api/v1/prices/ADRO`
+served a row dated 2026-10-08 written at 10:15 WIB, hours before that session
+closed, while the dashboard labelled it Fresh EOD data. Yahoo serves the
+still-forming daily bar during the trading day, and the refresh pipeline stored
+it (and predicted on it) as though it were a final close.
+
+What changed:
+
+- `prog5/refresh.py` gained `bar_is_still_forming` and `drop_forming_bar`:
+  right after the fetch, a trailing row dated a weekday session whose 17:30
+  WIB cutoff has not passed is dropped, so prices, indicators, and
+  predictions all agree on the last *completed* session. The run still
+  completes; the report carries a warning naming the intraday close that was
+  not stored. The same cutoff `scripts/check_site_freshness.py` and the
+  badge's `expectedCloseDate()` already apply is reused, so writer and
+  readers agree on when a session day counts as closed.
+- Regression test `test_refresh_stores_only_the_last_completed_session`
+  feeds the pipeline a synthetically forming bar and asserts the stored
+  prediction keeps yesterday's date and excludes the intraday price.
+
+How the daily cycle now behaves:
+
+- Between 09:15 and 17:29 WIB on a trading day, the scheduled refresh runs
+  but stores nothing new: it upserts the same previous-session rows
+  (idempotent) and leaves the intraday bar alone.
+- At or after 17:30 WIB, the next refresh stores the final close and adds
+  that session's prediction rows, so the dashboard's date advances exactly
+  once per session. The GitHub Actions writer runs every 30 minutes through
+  the evening (17:07-23:37 WIB), and the local Task Scheduler tasks at 17:35
+  and 21:05, so a completed yahoo close is picked up the same evening.
+
+Live checks this session (2026-10-09, WIB):
+
+- `scripts/check_site_freshness.py` vs the deployment: all ten tickers
+  `stored=2026-10-09 yahoo=2026-10-09 fresh`, exit 0. The date bug the QA
+  pass reported is no longer observable.
+- GitHub writer runs (#3, #4, #6, #7): every scheduled run that reached the
+  refresh step wrote to Neon; the two latest evening runs skipped the heavy
+  steps because the guard reported the site already matched Yahoo.
+- `python -m prog5.cli refresh --symbols ADRO` against Neon twice in a row:
+  run #20 and #21 both completed with identical stored values (close 2580,
+  five T rows), confirming the visible bar at session end is final and the
+  idempotence still holds.
+- `python -m pytest -q` from `Prog5/`: 83 passed (82 before), exit 0.
+
+Still open from QA: IDX holiday calendar for target dates, OOD signal
+hierarchy, and the intraday-formation state that QA suggested the UI show
+while the pipeline now hides the forming bar.
 
 ## antislop Delivery Gate
 
