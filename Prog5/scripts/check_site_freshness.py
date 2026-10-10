@@ -87,6 +87,34 @@ def verdicts(stored: dict[str, date | None], latest: dict[str, date | None]) -> 
     return behind
 
 
+def evaluate(stored: dict[str, date | None], latest: dict[str, date | None]) -> tuple[str, int]:
+    """Print per-ticker verdicts and return (verdict line, exit code).
+
+    A ticker with no Yahoo frame at all can never be matched, so it fails the
+    check: a Yahoo outage must not look like a healthy site. A stored close
+    more than one completed session behind Yahoo is reported with its own
+    verdict line so the workflow that calls this fails loudly rather than
+    skipping a refresh that was actually needed.
+    """
+    missing_yahoo = sorted(symbol for symbol, offered in latest.items() if offered is None)
+    behind = verdicts(stored, latest)
+    for symbol in sorted(stored):
+        have = stored[symbol]
+        offered = latest.get(symbol)
+        state = "behind" if symbol in behind else "fresh"
+        print(f"{symbol:5s} stored={have or 'none'!s:10s} yahoo={offered or 'none'!s:10s} {state}")
+    if missing_yahoo:
+        print(f"no Yahoo rows: {','.join(missing_yahoo)}")
+    if behind:
+        print(f"verdict=behind tickers={len(stored)} behind={','.join(behind)}")
+        return "verdict=behind", 1
+    if missing_yahoo:
+        print(f"verdict=behind tickers={len(stored)} behind={','.join(missing_yahoo)}")
+        return "verdict=behind", 1
+    print(f"verdict=fresh tickers={len(stored)}")
+    return "verdict=fresh", 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -104,17 +132,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"freshness check unreadable: {error}", file=sys.stderr)
         return 2
 
-    behind = verdicts(stored, latest)
-    for symbol in sorted(stored):
-        have = stored[symbol]
-        offered = latest.get(symbol)
-        state = "behind" if symbol in behind else "fresh"
-        print(f"{symbol:5s} stored={have or 'none'!s:10s} yahoo={offered or 'none'!s:10s} {state}")
-    if behind:
-        print(f"verdict=behind tickers={len(stored)} behind={','.join(behind)}")
-        return 1
-    print(f"verdict=fresh tickers={len(stored)}")
-    return 0
+    _, code = evaluate(stored, latest)
+    return code
 
 
 if __name__ == "__main__":

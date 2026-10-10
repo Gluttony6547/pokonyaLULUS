@@ -57,12 +57,19 @@ def test_due_slot_respects_time_and_weekday():
     times = (clock_time(17, 30),)
     monday = date(2026, 10, 5)
     before = utc_naive(local_at(monday, 16, 0))
-    assert scheduler.due_slot(before, None, times, WEEKDAYS) is None
+    # Monday 16:00 with no prior success: Friday's missed slot is still due
+    # (wide catch-up), so the hour-of-day check is asserted against a fresh
+    # history that cannot reach earlier slots.
+    assert scheduler.due_slot(before, None, times, WEEKDAYS) is not None
 
     after = utc_naive(local_at(monday, 18, 0))
     slot = scheduler.due_slot(after, None, times, WEEKDAYS)
     assert slot is not None
     assert (slot.date(), slot.strftime("%H:%M")) == (monday, "17:30")
+
+    # With Friday's run done, Monday 16:00 (slot not yet arrived) owes nothing.
+    friday_run = utc_naive(local_at(date(2026, 10, 2), 18, 0))
+    assert scheduler.due_slot(before, friday_run, times, WEEKDAYS) is None
 
 
 def test_scheduled_run_migrates_a_legacy_database_before_the_due_check(tmp_path, monkeypatch):
@@ -75,11 +82,13 @@ def test_scheduled_run_migrates_a_legacy_database_before_the_due_check(tmp_path,
     con.commit()
     con.close()
     monkeypatch.setenv("PROG5_DB_PATH", str(legacy))
-    monkeypatch.setenv("PROG5_SCHEDULE_DAYS", "mon,tue,wed,thu,fri")
+    monkeypatch.setenv("PROG5_SCHEDULE_DAYS", "mon")
     monkeypatch.setenv("PROG5_SCHEDULE_TIMES", "17:30")
     db.clear_caches()
 
-    # Monday 16:00 local: the 17:30 slot has not arrived, so nothing runs.
+    # Monday 16:00 local: this week's 17:30 slot has not arrived, and last
+    # Monday's slot is outside the catch-up window, so nothing is due while
+    # the legacy tables still get migrated before that check.
     before_slot = utc_naive(datetime(2026, 10, 5, 16, 0))
     try:
         outcome = scheduler.run_scheduled(now_utc=before_slot)
@@ -119,6 +128,36 @@ def test_missed_slot_is_caught_up_and_weekend_needs_nothing_new():
     # Once Friday's run happened, the weekend is quiet.
     friday_evening = utc_naive(local_at(friday, 18, 0))
     assert scheduler.due_slot(saturday_noon, friday_evening, times, WEEKDAYS) is None
+
+
+def test_a_long_holiday_gap_still_catches_up_to_its_newest_slot():
+    """A machine off through a multi-day holiday must not skip the last slot."""
+    times = (clock_time(17, 30),)
+    # Oct 2 (Fri) ran normally; Oct 5-9 the machine was off (holidays); now
+    # Monday Oct 12 morning the newest unsatisfied slot inside the window is
+    # Friday Oct 9's evening slot.
+    now = utc_naive(local_at(date(2026, 10, 12), 8, 22))
+    last = utc_naive(local_at(date(2026, 10, 2), 18, 0))
+    slot = scheduler.due_slot(now, last, times, WEEKDAYS)
+    assert slot is not None and slot.date() == date(2026, 10, 9)
+
+
+def test_catch_up_window_respects_the_five_day_limit():
+    """The window slides with the clock; slots older than CATCH_UP_DAYS never match."""
+    times = (clock_time(17, 30),)
+    now = utc_naive(local_at(date(2026, 10, 12), 8, 22))
+    last = utc_naive(local_at(date(2026, 10, 5), 17, 45))  # satisfied all slots up to Oct 5 only
+    slot = scheduler.due_slot(now, last, times, WEEKDAYS)
+    assert slot is not None and slot.date() == date(2026, 10, 9)
+
+
+def test_an_older_run_never_satisfies_a_newer_slot():
+    """A completed run from before a slot is no excuse for that slot."""
+    times = (clock_time(17, 30),)
+    now = utc_naive(local_at(date(2026, 10, 12), 8, 22))
+    last = utc_naive(local_at(date(2026, 10, 9), 9, 0))  # before Friday's evening slot
+    slot = scheduler.due_slot(now, last, times, WEEKDAYS)
+    assert slot is not None and slot.date() == date(2026, 10, 9)
 
 
 def test_scheduled_run_fires_the_trigger(temp_db, monkeypatch):

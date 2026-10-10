@@ -28,6 +28,12 @@ from .refresh import RefreshInProgress, RefreshReport, reconcile_interrupted_run
 
 logger = logging.getLogger(__name__)
 
+# How far back a due check looks for unsatisfied slots. One day covers an
+# evening outage, but a four-day weekend (holidays glued to Sat/Sun) needs
+# more, and both the Windows Task Scheduler tick and the workflow's own
+# freshness gate rely on this catch-up for the days in between.
+CATCH_UP_DAYS = 5
+
 
 @dataclass
 class ScheduledOutcome:
@@ -64,15 +70,16 @@ def due_slot(
     """Return the newest scheduled slot (local naive) that still needs a run.
 
     `now_utc` and `last_finished_utc` are naive UTC, matching the timestamps
-    stored in SQLite. Slots are local wall-clock times from config. Yesterday is
-    included so a machine that was off through one evening still catches up;
+    stored in SQLite. Slots are local wall-clock times from config. The last
+    CATCH_UP_DAYS days are included so a machine that was off — or a schedule
+    event GitHub dropped over a weekend-plus-holiday gap — still catches up;
     once a successful run is newer than a slot, that slot is satisfied.
     """
     schedule_times = times if times is not None else config.schedule_times()
     schedule_days = days if days is not None else config.schedule_days()
     local_now = now_utc.replace(tzinfo=timezone.utc).astimezone()
     candidates: list[tuple[datetime, datetime]] = []
-    for offset in (0, -1):
+    for offset in range(0, -CATCH_UP_DAYS - 1, -1):
         day = (local_now + timedelta(days=offset)).date()
         for slot_local in _slots_for_day(day, schedule_times, schedule_days):
             slot_utc = slot_local.astimezone(timezone.utc).replace(tzinfo=None)
