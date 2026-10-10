@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prog6 session-relative desk</title>
+  <link rel="icon" href="data:,">
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 60rem; }
+    table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+    th, td { border-bottom: 1px solid #ccc; padding: 0.4rem 0.6rem; text-align: right; }
+    th:first-child, td:first-child { text-align: left; }
+    .delta-negative { color: #b00; }
+    .delta-positive { color: #070; }
+    .muted { color: #666; font-size: 0.9rem; }
+    select { padding: 0.3rem 0.6rem; }
+  </style>
+</head>
+<body>
+  <h1>Prog6 session-relative desk</h1>
+  <p class="muted">Predicted <em>relative</em> returns fitted on the last stored sessions; baselines re-fit on every refresh, so no out-of-distribution warning applies.</p>
+
+  <label for="ticker-select">Ticker</label>
+  <select id="ticker-select"></select>
+  <div id="predictions"></div>
+  <div id="policies"></div>
+
+  <p class="muted">Prog6 is a read-only research layer over <a href="https://pokonya-lulus.vercel.app/">Prog5's dashboard</a>. Predicted relative return is research output, not investment advice.</p>
+
+<script>
+const SYMBOLS = ["ADRO","ANTM","BMRI","BNGA","EXCL","INCO","INKP","MEDC","PGAS","TLKM"];
+const $ = (id) => document.getElementById(id);
+const pct = (v, digits = 2) => v === null || v === undefined ? "n/a" : `${v >= 0 ? "+" : ""}${(v * 100).toFixed(digits)}%`;
+const idr = (v) => v === null || v === undefined ? "n/a" : new Intl.NumberFormat("en-ID", { maximumFractionDigits: 2 }).format(v);
+
+async function load(symbol) {
+  const [predictions, policies] = await Promise.all([
+    fetch(`/api/v1/predictions/latest/${symbol}`).then((r) => r.json()),
+    fetch(`/api/v1/policies/${symbol}`).then((r) => r.json()),
+  ]);
+  $("predictions").innerHTML = predictions.length ? `
+    <h2>Predicted relative return per horizon</h2>
+    <table>
+      <thead><tr><th>Horizon</th><th>As of</th><th>Rel. return</th><th>Expected close</th><th>Last close</th><th>Best policy</th><th>LSTM close</th><th>Delta vs LSTM</th></tr></thead>
+      <tbody>${predictions.map((p) => `
+        <tr>
+          <td>T+${p.horizon_days}</td><td>${p.data_as_of}</td>
+          <td>${pct(p.predicted_relative_return)}</td><td>${idr(p.expected_close)}</td>
+          <td>${idr(p.last_close)}</td><td>${p.best_policy}</td>
+          <td>${idr(p.lstm_predicted_price)}</td>
+          <td class="${p.lstm_delta_pct >= 0 ? 'delta-positive' : 'delta-negative'}">${pct(p.lstm_delta_pct)}</td>
+        </tr>`).join("")}</tbody>
+    </table>` : "<p>No Prog6 predictions yet; run <code>scripts/refresh_local.py</code> first.</p>";
+  $("policies").innerHTML = policies.length ? `
+    <h2>Backtest quality per policy</h2>
+    <table>
+      <thead><tr><th>Horizon</th><th>Policy</th><th>Hit rate</th><th>MAE</th><th>MAPE</th><th>Rows</th></tr></thead>
+      <tbody>${policies.map((p) => `
+        <tr><td>T+${p.horizon_days}</td><td>${p.policy}</td><td>${(p.hit_rate * 100).toFixed(1)}%</td>
+        <td>${(p.mae * 100).toFixed(2)}%</td><td>${(p.mape * 100).toFixed(2)}%</td><td>${p.backtest_rows}</td></tr>`).join("")}</tbody>
+    </table>` : "";
+}
+
+const select = $("ticker-select");
+SYMBOLS.forEach((s) => { const o = document.createElement("option"); o.value = o.textContent = s; select.append(o); });
+select.value = "ADRO";
+select.addEventListener("change", () => load(select.value));
+load(select.value);
+</script>
+</body>
+</html>
