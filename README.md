@@ -63,9 +63,10 @@ driver is configured without client-side prepared statements, which is what
 transaction-mode poolers need.
 
 Tables are created additively at startup and nothing existing is altered, so a
-fresh or empty database needs no setup: the first request seeds the ten tickers,
-the holiday calendar, and one model version per ticker and horizon, computing
-holdout metrics from `data/research/Result Price Prediction/`.
+fresh or empty database needs no setup: startup seeds the ten tickers and the
+holiday calendar, and the first refresh registers one model version per ticker
+and horizon and writes its signals, computing holdout metrics from
+`data/research/Result Price Prediction/`.
 
 One caveat, because it is easy to hit. The app uses the data model's plain table
 names (`stocks`, `predictions`, and so on). If the database already contains a

@@ -171,7 +171,37 @@ single 341.6 px column. The smallest interactive target is 44 px high (ticker
 buttons 63x44, theme toggle 130x44, refresh 204x44, and the checkbox label is a
 44 px row around an 18 px box).
 
-## 7. Repository state
+## 7. Schedule mapping
+
+The two `vercel.json` entries are documented as sitting an hour after the slot
+they serve. That mapping was checked directly against `due_slot`, building the
+fire times as true UTC instants:
+
+```
+cron 1 (10:05 UTC)  fires Mon 17:05 WIB -> slot 16:05  PASS
+cron 2 (12:05 UTC)  fires Mon 19:05 WIB -> slot 18:00  PASS
+```
+
+Vercel's Hobby plan fires a cron job within the scheduled hour rather than at
+the exact minute, so every minute offset in the hour was checked:
+
+```
+cron 1 jitter +00m .. +59m  -> slot 16:05  PASS (all six offsets)
+cron 2 jitter +00m .. +59m  -> slot 18:00  PASS (all six offsets)
+```
+
+The earliest any fire can land is 17:00 WIB, still after the 16:05 slot and
+after the 16:00 market close, so no offset can miss its slot. Two further
+cases: a cron fire already served earlier the same day returns no slot and
+fetches nothing, and a Saturday fire resolves to Friday's slot, which the
+trading-day check in `refresh()` then skips and logs as `skipped`.
+
+`idx_signal.cli serve --port 8031`, the command the README gives, was run as
+written: `/api/v1/health` and the dashboard both answered 200. With no database
+URL set, the documented SQLite fallback created its tables and seeded 10
+tickers and 36 holidays.
+
+## 8. Repository state
 
 Commit `4d73707`, "Serve the LSTM research as a deployable IDX signal dashboard",
 pushed to `pokonyaLULUS` `main` as a fast-forward from `e6f575e`. 237 files
@@ -203,7 +233,7 @@ Artifacts and reference series moved into `models/<SYMBOL>/` and
 count-objects` reports the same 196.58 MiB pack before and after the commit, so
 the re-organisation added no blob storage.
 
-## 8. What is not verified
+## 9. What is not verified
 
 - **The container image was not built or run here.** Docker is not installed on
   this machine. `Dockerfile`, `Dockerfile.vercel`, and the CI job that builds and
