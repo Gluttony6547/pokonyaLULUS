@@ -171,7 +171,39 @@ single 341.6 px column. The smallest interactive target is 44 px high (ticker
 buttons 63x44, theme toggle 130x44, refresh 204x44, and the checkbox label is a
 44 px row around an 18 px box).
 
-## 7. What is not verified
+## 7. Repository state
+
+Commit `4d73707`, "Serve the LSTM research as a deployable IDX signal dashboard",
+pushed to `pokonyaLULUS` `main` as a fast-forward from `e6f575e`. 237 files
+changed: 6,290 insertions, 25,625 deletions.
+
+`main` is now the only branch on that remote. Five `codex/*` branches were
+deleted, and because each held commits that were not in `main`, their tips were
+first recorded as tags so nothing became unreachable:
+
+| Tag | Was | Tip |
+|-----|-----|-----|
+| `archive/codex-cpu-torch-images` | `codex/cpu-torch-images` | `5f6271a` |
+| `archive/codex-model-horizons` | `codex/model-horizons` | `6d0ed26` |
+| `archive/codex-prog5-neon-bootstrap` | `codex/prog5-neon-bootstrap` | `19c3d9d` |
+| `archive/codex-prog5-production` | `codex/prog5-production` | `f2b76f6` |
+| `archive/codex-vercel-container` | `codex/vercel-container` | `4ead244` |
+
+The same six local branches were removed. Two were deliberately kept, and no
+branch was deleted anywhere else:
+
+- `consolidate-to-pokonya-main` (`979ddba`) holds 14 commits that exist on no
+  remote and in no archive tag, and differs from `main` in 261 files. It is the
+  only remaining copy, so it stays.
+- `main` (`a55e24b`) tracks `origin/main` on the `tugasakhir` remote, which is a
+  separate repository and was not touched.
+
+Artifacts and reference series moved into `models/<SYMBOL>/` and
+`data/research/`, and git recorded all 171 of them as pure renames: `git
+count-objects` reports the same 196.58 MiB pack before and after the commit, so
+the re-organisation added no blob storage.
+
+## 8. What is not verified
 
 - **The container image was not built or run here.** Docker is not installed on
   this machine. `Dockerfile`, `Dockerfile.vercel`, and the CI job that builds and
