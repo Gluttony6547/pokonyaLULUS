@@ -2,4 +2,10 @@
 .env
 __pycache__/
 .pytest_cache/
-data/*.db
+*.py[cod]
+
+# Local fallback database, its write lock, and retrained artifacts. Only the
+# reference artifacts and research series under data/research are committed.
+data/*.sqlite3
+data/*.sqlite3.lock
+data/trained/

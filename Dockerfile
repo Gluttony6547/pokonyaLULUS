@@ -1,27 +1,30 @@
+# CPU-only image. The saved artifacts were trained and evaluated on CPU-sized
+# inputs, and the default PyPI torch wheel is the CUDA build, which would add
+# gigabytes to the image and a GPU runtime dependency this service never uses.
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     KERAS_BACKEND=torch \
-    PYTHONPATH=/app/Prog5 \
-    PROG5_ARTIFACT_DIR=/app/models \
-    PROG5_RESEARCH_DATA_DIR=/app/Prog5/data/research
+    IDX_ARTIFACT_DIR=/app/models \
+    IDX_RESEARCH_DATA_DIR=/app/data/research \
+    IDX_SQLITE_PATH=/app/data/sinyal.sqlite3
 
 WORKDIR /app
 
-COPY requirements.txt requirements-torch-cpu.txt ./
-COPY Prog5/requirements.txt /tmp/prog5-requirements.txt
+COPY requirements-torch-cpu.txt ./
 RUN pip install --no-cache-dir -r requirements-torch-cpu.txt \
-    && pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir -r /tmp/prog5-requirements.txt \
     && python -c "import torch; assert torch.version.cuda is None"
 
-COPY Prog5/prog5 ./Prog5/prog5
-COPY Prog5/data/prog5.sqlite3 ./Prog5/data/prog5.sqlite3
-COPY Prog5/data/research/Fusion_Data_*.csv ./Prog5/data/research/
-COPY Prog5/data/research/Labelled_Stock_*.csv ./Prog5/data/research/
-COPY models ./models
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
+COPY idx_signal ./idx_signal
+COPY models ./models
+COPY data/research ./data/research
+
+# Vercel injects PORT; a plain `docker run` falls back to 80.
+ENV PORT=80
 EXPOSE 80
 
-CMD ["sh", "-c", "uvicorn prog5.api:app --host 0.0.0.0 --port ${PORT:-80}"]
+CMD ["sh", "-c", "uvicorn idx_signal.api:app --host 0.0.0.0 --port ${PORT}"]

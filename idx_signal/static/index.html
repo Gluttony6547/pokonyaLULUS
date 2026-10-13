@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="id" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sinyal IDX, sinyal LSTM untuk sepuluh emiten</title>
+    <meta
+      name="description"
+      content="Sinyal Buy, Hold, dan Sell dari model LSTM tersimpan untuk sepuluh emiten IDX pada horizon 1, 5, 10, 20, dan 50 sesi."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#signals">Lewati ke panel sinyal</a>
+
+    <header class="topbar">
+      <p class="wordmark">Sinyal<abbr title="Bursa Efek Indonesia">IDX</abbr></p>
+      <p class="freshness" id="freshness" aria-live="polite">Memuat data pembaruan terakhir.</p>
+      <div class="topbar-actions">
+        <button type="button" class="button" id="refresh-button">Perbarui data sekarang</button>
+        <button type="button" class="button button-quiet" id="theme-toggle" aria-pressed="false">
+          Mode gelap
+        </button>
+      </div>
+    </header>
+
+    <div class="banner" id="banner" role="status" hidden></div>
+
+    <main class="layout">
+      <section class="panel" id="signals" aria-labelledby="signals-heading">
+        <div class="panel-head">
+          <div>
+            <h1 id="signals-heading">Sinyal terbaru</h1>
+            <p class="panel-sub" id="signals-sub">Memuat sinyal.</p>
+          </div>
+          <p class="reference-price" id="reference-price"></p>
+        </div>
+
+        <div class="rail" id="ticker-rail" role="group" aria-label="Pilih saham"></div>
+
+        <div class="signal-state" id="signal-state" aria-live="polite"></div>
+
+        <div class="signal-body" id="signal-body" hidden>
+          <table class="signal-table">
+            <caption class="visually-hidden">
+              Sinyal per horizon untuk saham terpilih
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Horizon</th>
+                <th scope="col">Sinyal</th>
+                <th scope="col">Perkiraan</th>
+                <th scope="col">Perubahan</th>
+                <th scope="col">Tanggal target</th>
+                <th scope="col">Model</th>
+              </tr>
+            </thead>
+            <tbody id="signal-rows"></tbody>
+          </table>
+          <p class="signal-note" id="signal-note"></p>
+        </div>
+
+        <p class="disclaimer">
+          Sinyal ini keluaran model statistik untuk pendukung keputusan, bukan saran investasi.
+          Model dilatih pada data historis, sehingga akurasi masa lalu tidak menjamin hasil di
+          masa depan.
+        </p>
+      </section>
+
+      <div class="context">
+        <section class="card" aria-labelledby="freshness-heading">
+          <h2 id="freshness-heading">Kesegaran data</h2>
+          <dl class="facts" id="freshness-facts"></dl>
+        </section>
+
+        <section class="card" aria-labelledby="chart-heading">
+          <h2 id="chart-heading">Harga penutup, 180 sesi terakhir</h2>
+          <figure class="chart">
+            <svg
+              id="price-chart"
+              viewBox="0 0 480 200"
+              preserveAspectRatio="none"
+              role="img"
+              aria-labelledby="chart-caption"
+            ></svg>
+            <figcaption id="chart-caption" class="chart-caption"></figcaption>
+          </figure>
+          <dl class="facts facts-inline" id="chart-facts"></dl>
+        </section>
+
+        <section class="card" aria-labelledby="context-heading">
+          <h2 id="context-heading">Indikator sesi terakhir</h2>
+          <dl class="facts facts-inline" id="indicator-facts"></dl>
+          <p class="card-note">
+            Dihitung ulang dari data tersimpan dengan rumus yang sama seperti pipeline riset.
+            Indikator tidak dipakai model untuk memprediksi, hanya penjelas.
+          </p>
+        </section>
+      </div>
+
+      <section class="panel wide" id="history" aria-labelledby="history-heading">
+        <div class="panel-head">
+          <div>
+            <h2 id="history-heading">Riwayat sinyal</h2>
+            <p class="panel-sub">
+              Setiap baris menyimpan tanggal data yang dipakai, jadi satu sinyal bisa ditelusuri.
+            </p>
+          </div>
+          <label class="field">
+            <span>Horizon</span>
+            <select id="history-horizon"></select>
+          </label>
+        </div>
+        <div class="signal-state" id="history-state" aria-live="polite"></div>
+        <div class="table-scroll" id="history-wrap" hidden>
+          <table class="plain-table">
+            <caption class="visually-hidden">Riwayat sinyal untuk saham terpilih</caption>
+            <thead>
+              <tr>
+                <th scope="col">Data per</th>
+                <th scope="col">Sinyal</th>
+                <th scope="col">Harga acuan</th>
+                <th scope="col">Perkiraan</th>
+                <th scope="col">Perubahan</th>
+                <th scope="col">Tanggal target</th>
+                <th scope="col">Dibuat</th>
+              </tr>
+            </thead>
+            <tbody id="history-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel wide" id="updates" aria-labelledby="updates-heading">
+        <div class="panel-head">
+          <div>
+            <h2 id="updates-heading">Riwayat pembaruan data</h2>
+            <p class="panel-sub">
+              Satu baris per percobaan, termasuk yang gagal dan yang dilewati pada hari libur bursa.
+            </p>
+          </div>
+        </div>
+        <div class="signal-state" id="updates-state" aria-live="polite"></div>
+        <ol class="log-list" id="update-list"></ol>
+      </section>
+
+      <section class="panel wide" id="models" aria-labelledby="models-heading">
+        <div class="panel-head">
+          <div>
+            <h2 id="models-heading">Model dan pelatihan</h2>
+            <p class="panel-sub">
+              Versi acuan adalah berkas LSTM yang sudah terverifikasi. Melatih ulang menghasilkan
+              versi kandidat yang belum dipakai sampai diaktifkan.
+            </p>
+          </div>
+        </div>
+
+        <form class="train-form" id="train-form">
+          <label class="field">
+            <span>Horizon</span>
+            <select id="train-horizon"></select>
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" id="train-force" />
+            <span>Latih ulang walau model sudah ada</span>
+          </label>
+          <button type="submit" class="button" id="train-submit">Latih model</button>
+        </form>
+
+        <div class="signal-state" id="models-state" aria-live="polite"></div>
+        <div class="table-scroll" id="versions-wrap" hidden>
+          <table class="plain-table">
+            <caption class="visually-hidden">
+              Versi model untuk saham terpilih beserta metrik holdout
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Horizon</th>
+                <th scope="col">Versi</th>
+                <th scope="col">Asal</th>
+                <th scope="col">Akurasi</th>
+                <th scope="col">Presisi</th>
+                <th scope="col">Recall</th>
+                <th scope="col">F1</th>
+                <th scope="col">Berkas</th>
+                <th scope="col">Status</th>
+              </tr>
+            </thead>
+            <tbody id="versions-rows"></tbody>
+          </table>
+        </div>
+
+        <h3 class="subheading">Pekerjaan pelatihan</h3>
+        <ol class="log-list" id="jobs-list"></ol>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <p>
+        Model: 50 berkas LSTM dari riset acuan (<code>CODE/Price Prediction Model</code>), diverifikasi
+        ulang terhadap keluaran riset pada setiap rilis. Data harga: Yahoo Finance untuk kode
+        <code>.JK</code>, diperbarui pada hari bursa setelah penutupan.
+      </p>
+      <p>
+        Sinyal bukan saran investasi. Aplikasi tidak melakukan transaksi dan tidak mengelola
+        portofolio.
+      </p>
+    </footer>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

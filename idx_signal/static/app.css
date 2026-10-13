@@ -1,0 +1,772 @@
+/* Palette, spacing scale, and every colour decision are documented in DESIGN.md. */
+
+:root {
+  --base: #f4f2ed;
+  --surface: #ffffff;
+  --ink: #14161a;
+  --muted: #565c66;
+  --rule: #dcd7cc;
+  --accent: #8a4200;
+  --accent-ink: #ffffff;
+  --accent-quiet: #f0e6da;
+  --buy-ink: #0f5b32;
+  --buy-tint: #e3f0e6;
+  --hold-ink: #4c535f;
+  --hold-tint: #e9e7e1;
+  --sell-ink: #9b1c1c;
+  --sell-tint: #f7e4e2;
+  --warn-ink: #7a4a00;
+  --warn-tint: #faefd9;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --gap: 20px;
+  --font: "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+[data-theme="dark"] {
+  --base: #101215;
+  --surface: #171a1e;
+  --ink: #e9eaec;
+  --muted: #a0a6ae;
+  --rule: #262b31;
+  --accent: #e0a05a;
+  --accent-ink: #101215;
+  --accent-quiet: #2a2117;
+  --buy-ink: #6ed39b;
+  --buy-tint: #132a1f;
+  --hold-ink: #b7bec8;
+  --hold-tint: #1f2429;
+  --sell-ink: #f08c86;
+  --sell-tint: #2c1718;
+  --warn-ink: #e8b463;
+  --warn-tint: #2b2318;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  margin: 0;
+  background: var(--base);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 15px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  line-height: 1.25;
+  font-weight: 600;
+}
+
+h1 {
+  font-size: 1.35rem;
+  letter-spacing: -0.01em;
+}
+
+h2 {
+  font-size: 1rem;
+}
+
+h3 {
+  font-size: 0.95rem;
+}
+
+p {
+  margin: 0;
+}
+
+code {
+  font-family: ui-monospace, "Cascadia Mono", "SFMono-Regular", Menlo, monospace;
+  font-size: 0.9em;
+}
+
+abbr {
+  text-decoration: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 10px 14px;
+  border: 1px solid var(--accent);
+  z-index: 10;
+}
+
+.skip-link:focus {
+  left: 8px;
+  top: 8px;
+}
+
+/* Top bar */
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 20px;
+  padding: 14px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+}
+
+.wordmark {
+  font-size: 1.05rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.wordmark abbr {
+  color: var(--accent);
+  margin-left: 0.25em;
+  letter-spacing: 0.06em;
+  font-size: 0.86em;
+}
+
+.freshness {
+  color: var(--muted);
+  font-size: 0.86rem;
+  flex: 1 1 16rem;
+}
+
+.topbar-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* Controls */
+
+.button {
+  font: inherit;
+  font-weight: 500;
+  padding: 9px 14px;
+  min-height: 44px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+
+.button:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.button:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.button-quiet {
+  background: transparent;
+  border-color: var(--rule);
+  color: var(--ink);
+}
+
+.button-quiet:hover:not(:disabled) {
+  border-color: var(--accent);
+  opacity: 1;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.field select {
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-sm);
+  padding: 8px 9px;
+  min-height: 44px;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.88rem;
+  color: var(--ink);
+  min-height: 44px;
+}
+
+.checkbox input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+/* Banner */
+
+.banner {
+  margin: 16px 24px 0;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--rule);
+  background: var(--surface);
+  font-size: 0.9rem;
+}
+
+.banner[data-tone="warn"] {
+  border-color: var(--warn-ink);
+  background: var(--warn-tint);
+  color: var(--warn-ink);
+}
+
+.banner[data-tone="error"] {
+  border-color: var(--sell-ink);
+  background: var(--sell-tint);
+  color: var(--sell-ink);
+}
+
+.banner[data-tone="ok"] {
+  border-color: var(--buy-ink);
+  background: var(--buy-tint);
+  color: var(--buy-ink);
+}
+
+.banner p + p {
+  margin-top: 6px;
+}
+
+/* Layout */
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: var(--gap);
+  padding: var(--gap) 24px 40px;
+  align-items: start;
+}
+
+.panel,
+.card {
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius-md);
+}
+
+.panel {
+  padding: 20px;
+}
+
+.card {
+  padding: 16px 18px;
+}
+
+.panel.wide {
+  grid-column: 1 / -1;
+}
+
+.context {
+  display: grid;
+  gap: var(--gap);
+}
+
+.panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 20px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.panel-sub {
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin-top: 4px;
+  max-width: 62ch;
+}
+
+.subheading {
+  margin: 22px 0 10px;
+}
+
+.card-note {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin-top: 10px;
+}
+
+/* Ticker rail */
+
+.rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 16px 0 4px;
+}
+
+.rail button {
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  padding: 8px 11px;
+  min-height: 44px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--rule);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+
+.rail button:hover {
+  border-color: var(--accent);
+}
+
+.rail button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-quiet);
+  color: var(--ink);
+}
+
+/* Signal table */
+
+.reference-price {
+  font-size: 0.86rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.signal-body {
+  margin-top: 16px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.signal-table th,
+.plain-table th {
+  text-align: left;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--muted);
+  padding: 0 10px 8px 0;
+  border-bottom: 1px solid var(--rule);
+  white-space: nowrap;
+}
+
+.signal-table td,
+.plain-table td {
+  padding: 12px 10px 12px 0;
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+  font-size: 0.92rem;
+}
+
+.signal-table tr:last-child td,
+.plain-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.horizon {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.artifact {
+  font-family: ui-monospace, "Cascadia Mono", monospace;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.delta-pos {
+  color: var(--buy-ink);
+}
+
+.delta-neg {
+  color: var(--sell-ink);
+}
+
+.delta-flat {
+  color: var(--muted);
+}
+
+/* Signal chip: the only place colour carries meaning. */
+
+.chip {
+  display: inline-block;
+  padding: 3px 9px;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.chip[data-signal="BUY"] {
+  color: var(--buy-ink);
+  background: var(--buy-tint);
+}
+
+.chip[data-signal="HOLD"] {
+  color: var(--hold-ink);
+  background: var(--hold-tint);
+}
+
+.chip[data-signal="SELL"] {
+  color: var(--sell-ink);
+  background: var(--sell-tint);
+}
+
+.note-row td {
+  padding-top: 0;
+  color: var(--warn-ink);
+  font-size: 0.82rem;
+}
+
+.signal-table tr.note-row + tr td {
+  padding-top: 12px;
+}
+
+.signal-note {
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
+.signal-state {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px dashed var(--rule);
+  border-radius: var(--radius-md);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.signal-state[hidden] {
+  display: none;
+}
+
+.signal-state strong {
+  color: var(--ink);
+  display: block;
+  margin-bottom: 4px;
+}
+
+.signal-state[data-tone="error"] {
+  border-color: var(--sell-ink);
+  border-style: solid;
+  color: var(--sell-ink);
+}
+
+.signal-state[data-tone="error"] strong {
+  color: var(--sell-ink);
+}
+
+.signal-state .state-action {
+  margin-top: 10px;
+}
+
+/* Facts lists */
+
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  margin: 12px 0 0;
+  font-size: 0.88rem;
+}
+
+.facts dt {
+  color: var(--muted);
+}
+
+.facts dd {
+  margin: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.facts-inline {
+  border-top: 1px solid var(--rule);
+  padding-top: 12px;
+}
+
+/* Chart */
+
+.chart {
+  margin: 12px 0 0;
+}
+
+#price-chart {
+  width: 100%;
+  height: 180px;
+  display: block;
+  border-bottom: 1px solid var(--rule);
+}
+
+.chart-caption {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-legend {
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.chart-legend span::before {
+  content: "";
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  margin-right: 6px;
+  vertical-align: middle;
+  background: var(--ink);
+}
+
+.chart-legend span.sma::before {
+  background: var(--accent);
+}
+
+/* Tables that need to scroll on narrow screens */
+
+.table-scroll {
+  overflow-x: auto;
+  margin-top: 14px;
+}
+
+/* Log lists */
+
+.log-list {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  border-top: 1px solid var(--rule);
+}
+
+.log-list li {
+  display: grid;
+  grid-template-columns: 10.5rem 7.5rem 1fr;
+  gap: 4px 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--rule);
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.log-list .log-time {
+  color: var(--muted);
+}
+
+.log-list .log-status {
+  font-weight: 600;
+}
+
+.log-list .log-status[data-status="success"] {
+  color: var(--buy-ink);
+}
+
+.log-list .log-status[data-status="partial"],
+.log-list .log-status[data-status="skipped"],
+.log-list .log-status[data-status="queued"],
+.log-list .log-status[data-status="running"] {
+  color: var(--warn-ink);
+}
+
+.log-list .log-status[data-status="failed"] {
+  color: var(--sell-ink);
+}
+
+.log-list .log-detail {
+  color: var(--muted);
+}
+
+.train-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+/* Footer */
+
+.footer {
+  border-top: 1px solid var(--rule);
+  background: var(--surface);
+  padding: 18px 24px 28px;
+  color: var(--muted);
+  font-size: 0.84rem;
+  display: grid;
+  gap: 8px;
+  max-width: 96ch;
+}
+
+/* Empty and loading states keep their own line so they never look like data. */
+
+@media (max-width: 1000px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 16px 16px 32px;
+  }
+
+  .reference-price {
+    text-align: left;
+  }
+}
+
+@media (max-width: 780px) {
+  .topbar {
+    padding: 12px 16px;
+  }
+
+  .topbar-actions {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .topbar-actions .button {
+    flex: 1 1 auto;
+  }
+
+  .signal-table thead {
+    display: none;
+  }
+
+  .signal-table,
+  .signal-table tbody,
+  .signal-table tr,
+  .signal-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .signal-table tr {
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    margin-bottom: 10px;
+  }
+
+  .signal-table td {
+    display: grid;
+    grid-template-columns: 8.5rem minmax(0, 1fr);
+    gap: 10px;
+    padding: 4px 0;
+    border-bottom: 0;
+  }
+
+  .signal-table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 0.82rem;
+  }
+
+  .signal-table tr.note-row {
+    margin-top: -10px;
+  }
+
+  .signal-table tr.note-row td {
+    display: block;
+  }
+
+  /* Stacked cells hold long artifact names and warning sentences, so the text
+     has to break instead of spilling past the panel padding. */
+  .signal-table td,
+  .plain-table td,
+  .artifact,
+  .log-detail {
+    overflow-wrap: anywhere;
+  }
+
+  .plain-table,
+  .plain-table tbody,
+  .plain-table tr,
+  .plain-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .plain-table thead {
+    display: none;
+  }
+
+  .plain-table tr {
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-md);
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+
+  .plain-table td {
+    display: grid;
+    grid-template-columns: 8.5rem minmax(0, 1fr);
+    gap: 10px;
+    padding: 3px 0;
+    border-bottom: 0;
+  }
+
+  .plain-table td::before {
+    content: attr(data-label);
+    color: var(--muted);
+    font-size: 0.82rem;
+  }
+
+  .log-list li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+
+  .footer {
+    padding: 16px 16px 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

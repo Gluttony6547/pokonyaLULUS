@@ -1,12 +1,23 @@
 .git
-.env
+.github
 .pytest_cache
+.venv
 __pycache__
 *.py[cod]
-Prog5/tests
-Prog5/prog5/prog5
-2026053141-1.pdf
-Prompt.md
-Prompt_Mermaid.md
-README.md
-AGENTS.md
+
+# The research checkout is a working tree of the same artifacts; the image only
+# needs the artifacts and the reference series that the Dockerfile copies.
+CODE
+
+# Superseded releases, paperwork, and local state.
+Prog5
+Prog6
+template-proposal-TA
+template_render
+*.pdf
+*.docx
+*.xlsx
+data/*.sqlite3
+data/*.sqlite3.lock
+data/trained
+tests

@@ -1,60 +1,179 @@
-# Prog5 IDX Signal Desk
+# Sinyal IDX
 
-Web dashboard for inspecting saved LSTM price forecasts for ten IDX tickers at T+1, T+5, T+10, T+20, and T+50. It reports the model output and threshold-based signal with data freshness and out-of-distribution context; it does not provide confidence probabilities or investment advice.
+Dashboard and API that turn the saved LSTM artifacts of the reference research
+into buy, hold, and sell signals for ten IDX tickers at horizons of 1, 5, 10, 20,
+and 50 trading sessions. Prices refresh automatically on IDX trading days after
+the 16:00 WIB close. The service is decision support: it does not place orders
+and its output is not investment advice.
+
+Signals are computed from the 50 saved `LSTM_<SYMBOL>_Target_<H>.h5` artifacts,
+the same files the research notebooks produced. Each signal records the data
+date it was made from and the model version behind it, so any row on the
+dashboard can be traced back to a file and a session.
+
+## What the dashboard offers
+
+- Latest buy, hold, or sell label per horizon, with the reference close, the
+  model's projected price, the threshold it was compared against, the projected
+  target date, and the model version.
+- Out-of-distribution and corporate-action warnings attached to the signal that
+  triggered them, plus a note when a target date crosses a calendar year the
+  holiday table does not cover.
+- Price chart, indicator context (SMA, RSI, MACD, Bollinger), signal history per
+  horizon, data update log, and model versions with their holdout metrics.
+- Retraining on the stored price history, queued as a job with visible status.
+- Light and dark themes, keyboard navigation, and explicit empty, loading, and
+  error states.
+
+## Requirements
+
+- Python 3.12 or newer.
+- PostgreSQL 15 or newer for a shared deployment. Without a database URL the
+  service falls back to a local SQLite file, which is what the tests use.
+- The model artifacts and the reference series, both in this repository:
+  `models/<SYMBOL>/` and `data/research/`.
 
 ## Run locally
 
-Use Python 3.12+, then install and start the service from the repository root:
-
-```powershell
+```bash
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements-torch-cpu.txt
-python -m pip install -r Prog5/requirements-dev.txt
-$env:PYTHONPATH = "$PWD/Prog5"
-$env:PROG5_ARTIFACT_DIR = "$PWD/models"
-$env:PROG5_RESEARCH_DATA_DIR = "$PWD/Prog5/data/research"
-python -m prog5.cli serve --host 127.0.0.1
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
+pip install -r requirements-torch-cpu.txt
+pip install -r requirements-dev.txt
+python -m idx_signal.cli seed        # create tables and seed tickers and holidays
+python -m idx_signal.cli serve --port 8000
 ```
 
-The dashboard is at `/`, API docs at `/docs`, and health at `/api/v1/health`. Without `DATABASE_URL`, Prog5 stores local data in `Prog5/data/prog5.sqlite3`.
+Open `http://127.0.0.1:8000` for the dashboard, `/docs` for the API schema, and
+`/api/v1/health` for the machine-readable status. Copy `.env.example` to `.env`
+to point it at Postgres or to change the schedule; `.env` is gitignored.
 
-## Neon and production
+Fill the database with prices and signals with a manual update, either from the
+button on the dashboard or:
 
-Set `DATABASE_URL` to Neon's pooled connection string for the running service. Keep the direct URL out of deployment runtime; use it only for one-time administration or bulk snapshot import. At startup Prog5 creates its additive tables with a `prog5_` prefix, leaving any pre-existing tables untouched.
-
-An empty production database is seeded at first startup from the reviewed
-snapshot bundled in `Prog5/data/prog5.sqlite3`. Existing data is never replaced.
-For manual repair or an intentional import, use:
-
-```powershell
-$env:PROG5_DATABASE_URL = $env:DATABASE_URL_UNPOOLED
-python -m prog5.cli import-snapshot --sqlite-path "C:\path\to\prog5.sqlite3"
+```bash
+python -m idx_signal.cli refresh
 ```
 
-The importer preserves existing records and can be rerun safely. Configure `PROG5_ARTIFACT_DIR` and `PROG5_RESEARCH_DATA_DIR` only when running outside the included Docker image; the Vercel image sets these paths itself. Local scheduler execution remains an operator-managed process; Vercel's ephemeral filesystem is not used for scheduled writes.
+## Postgres
 
-## Model and data provenance
+Set `IDX_DATABASE_URL` (or `DATABASE_URL`) to any Postgres 15+ connection
+string. Neon's pooled URL and Supabase's session pooler URL both work; the
+driver is configured without client-side prepared statements, which is what
+transaction-mode poolers need.
 
-The image includes the 50 LSTM `.h5` files from `CODE/Price Prediction Model` and the fusion and labelled close series needed to reconstruct scalers. Their SHA-256 values match the original model files. GRU/RNN experiments, replication outputs, raw stock fixtures, notebooks, workbooks, raw news, and unrelated research exports stay outside the runtime image; CI retains the verification fixtures and `prog5.cli verify` compares predictions with the research CSVs.
+Tables are created additively at startup, and the tables already in the
+database are left alone, so pointing the service at a database that holds other
+work is safe. On a fresh database the first refresh registers one model version
+per ticker and horizon, computing its holdout metrics from
+`data/research/Result Price Prediction/`.
 
-The source models were trained on data ending in 2023. Out-of-distribution and corporate-action checks are warnings/guards; they do not correct regime drift or make the forecasts reliable for trading.
+## Scheduled updates
+
+The schedule is wall-clock WIB, never the host's local time, and it decides
+*when a run is due*: the actual trigger is an external scheduler. Two slots per
+trading day are configured by default, `16:05` and `18:00` WIB, so the second
+run can overwrite a straggling feed with the provider's settled end-of-day
+values. `IDX_SCHEDULE_TIMES`, `IDX_SCHEDULE_DAYS`, and `IDX_SCHEDULE_SYMBOLS`
+adjust that.
+
+On Vercel the trigger is the cron pair in `vercel.json`:
+
+| vercel.json schedule | UTC | WIB | Serves the slot |
+|----------------------|-----|-----|-----------------|
+| `5 10 * * 1-5`       | 10:05 | 17:05 | 16:05 |
+| `5 12 * * 1-5`       | 12:05 | 19:05 | 18:00 |
+
+Vercel fires cron jobs within the scheduled hour rather than at the exact
+minute on the Hobby plan, so both entries sit an hour after the slot they serve
+and the due check still finds the slot. Vercel sends
+`Authorization: Bearer $CRON_SECRET` when that environment variable exists;
+without it the endpoint refuses to run, so a deployment cannot be triggered by
+a stranger.
+
+Anywhere else, run the same due check in a loop:
+
+```bash
+python -m idx_signal.cli schedule
+```
+
+Both paths call one refresh pipeline, so the automated and manual updates write
+the same rows, and the update log records which of them ran.
+
+## Deploy
+
+### Vercel, as a container service
+
+`Dockerfile.vercel` at the repository root is what Vercel's container runtime
+auto-detects; the image installs CPU-only torch, the application, the 50
+artifacts, and the reference series. Import the repository, keep the framework
+preset on "Other", and set:
+
+| Variable | Value |
+|----------|-------|
+| `IDX_DATABASE_URL` | your Postgres connection string |
+| `CRON_SECRET` | a long random string |
+
+Then deploy. The cron entries in `vercel.json` start firing on the first
+production deployment. Container instances scale down after a few idle minutes,
+which is why the schedule is driven by cron and not by the in-process loop; the
+dashboard's own polling keeps an instance warm while somebody is looking at it.
+
+Retraining writes its artifact to the container filesystem, which is ephemeral
+on this platform. A retrained version therefore lives as long as the instance
+that trained it, and a candidate is never served until somebody activates it.
+On a host with a persistent volume (`IDX_TRAINING_DIR`) retrained artifacts
+survive.
+
+### Any Docker host
+
+```bash
+docker build -t idx-signal .
+docker run --rm -p 8000:80 -e IDX_DATABASE_URL=... -e CRON_SECRET=... idx-signal
+```
+
+The image listens on `PORT` (default 80), ships `models/` and `data/research/`
+at the paths `IDX_ARTIFACT_DIR` and `IDX_RESEARCH_DATA_DIR` point to, and needs
+no volume for the reference path.
 
 ## Verification
 
-```powershell
-$env:PYTHONPATH = "$PWD/Prog5"
-$env:PROG5_ARTIFACT_DIR = "$PWD/models"
-$env:PROG5_RESEARCH_DATA_DIR = "$PWD/Prog5/data/research"
-python -m pytest -q Prog5/tests
-python -m prog5.cli inventory
-python -m prog5.cli verify
+```bash
+python -m pytest -q                     # unit and integration tests
+python -m idx_signal.cli inventory      # artifacts resolvable per ticker
+python -m idx_signal.cli verify         # serving path vs the committed research output
 ```
 
-GitHub Actions runs the Prog5 tests, the artifact replication check, and both container builds. The linked Vercel project deploys its container from `main`.
+`verify` is the important one: it rebuilds the research notebook's sliding
+windows, runs them through the same scalers and artifacts the service serves,
+and compares the result with the committed predictions. `REPORT.md` holds the
+recorded output and the click-through of the dashboard.
 
-## Product and engineering decisions
+## Layout
 
-- [Prog5 PRD](Prog5/PRD.md)
-- [Engineering notes and PDM](Prog5/NOTE.md)
-- [Verification report](Prog5/REPORT.md)
+| Path | Contents |
+|------|----------|
+| `idx_signal/` | application package: config, storage, prediction, refresh, scheduler, training, API |
+| `idx_signal/static/` | dashboard: one HTML page, one stylesheet, one script, no build step |
+| `models/<SYMBOL>/` | the 50 saved LSTM artifacts |
+| `data/research/` | fusion series, labelled series, and the committed research predictions |
+| `tests/` | pytest suite, network calls replaced by fixtures |
+| `CODE/` | the research checkout the artifacts came from (not part of the image) |
+| `DESIGN.md` | the visual direction the dashboard follows |
+| `PRD_UCD_PDM_Prediksi_Sinyal_Saham_IDX.md` | product, use case, and data model design |
+
+## Provenance and limits
+
+The artifacts were trained on data ending in 2023, and the repository's `verify`
+command is what ties them to the published research output. Out-of-distribution
+and corporate-action checks are warnings: they do not correct regime drift, and
+a signal computed from a stale input window is still displayed as a signal.
+Predictions are only ever made from data available on or before the recorded
+data date.
+
+The research also trained on 19 features including news sentiment. This service
+uses the closing-price window the artifacts expect and recomputes the indicators
+for context only, so it is the price path of the research, not the sentiment
+path. Holdout metrics shown per model version come from the research test split
+(`source: reference holdout`) or from a retraining run's chronological holdout
+(`source: retrained, chronological holdout`), whichever produced that version.

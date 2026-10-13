@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-torch-cpu.txt
+          pip install -r requirements-dev.txt
+
+      - name: Tests
+        run: python -m pytest -q
+
+      - name: Artifact inventory
+        run: python -m idx_signal.cli inventory
+
+      - name: Replication check against the committed research output
+        run: python -m idx_signal.cli verify --symbols ADRO,ANTM --horizons 1,50
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build the deployment image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          push: false
+          tags: idx-signal:ci
+
+      - name: Start the image and probe the API
+        run: |
+          docker run -d --name idx-signal -p 8000:80 \
+            -e IDX_SQLITE_PATH=/tmp/sinyal.sqlite3 idx-signal:ci
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/api/v1/health; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "health endpoint never answered"
+          docker logs idx-signal
+          exit 1
+
+      - name: Stop the container
+        if: always()
+        run: docker rm -f idx-signal || true
