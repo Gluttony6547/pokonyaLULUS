@@ -62,11 +62,26 @@ string. Neon's pooled URL and Supabase's session pooler URL both work; the
 driver is configured without client-side prepared statements, which is what
 transaction-mode poolers need.
 
-Tables are created additively at startup, and the tables already in the
-database are left alone, so pointing the service at a database that holds other
-work is safe. On a fresh database the first refresh registers one model version
-per ticker and horizon, computing its holdout metrics from
-`data/research/Result Price Prediction/`.
+Tables are created additively at startup and nothing existing is altered, so a
+fresh or empty database needs no setup: the first request seeds the ten tickers,
+the holiday calendar, and one model version per ticker and horizon, computing
+holdout metrics from `data/research/Result Price Prediction/`.
+
+One caveat, because it is easy to hit. The app uses the data model's plain table
+names (`stocks`, `predictions`, and so on). If the database already contains a
+table with one of those names but different columns, creation is skipped for
+that table and the first query fails on the missing column. This is what
+happens when an earlier version of the project used the same names. Point the
+service at its own namespace instead of migrating the old data:
+
+```bash
+IDX_DATABASE_SCHEMA=sinyal python -m idx_signal.cli refresh
+```
+
+The tables then live at `sinyal.stocks`, `sinyal.predictions`, and so on, with
+the same names the design document specifies, and no existing table is read or
+changed. Leave `IDX_DATABASE_SCHEMA` unset on a dedicated database and the
+tables go in the connection's default schema.
 
 ## Scheduled updates
 
@@ -112,6 +127,7 @@ preset on "Other", and set:
 | Variable | Value |
 |----------|-------|
 | `IDX_DATABASE_URL` | your Postgres connection string |
+| `IDX_DATABASE_SCHEMA` | a schema name, when that database already holds tables using the same names |
 | `CRON_SECRET` | a long random string |
 
 Then deploy. The cron entries in `vercel.json` start firing on the first
