@@ -7,10 +7,10 @@ from datetime import date
 import pytest
 from sqlalchemy import func, select
 
-from idx_signal import db
+from idx_signal import config, db
 from idx_signal.models import DataUpdateLog, Prediction
 from idx_signal.refresh import RefreshInProgress, refresh, refresh_guard
-from idx_signal.storage import recent_updates
+from idx_signal.storage import active_model_version, recent_updates
 
 
 def prediction_count() -> int:
@@ -45,6 +45,25 @@ def test_running_twice_updates_in_place(offline_fetch, reference_assets):
     assert prediction_count() == 1
     with db.session() as session:
         assert session.scalar(select(func.count()).select_from(DataUpdateLog)) == 2
+
+
+def test_refresh_rebases_reference_model_path_from_another_os(offline_fetch, reference_assets):
+    first = refresh(["ADRO"], horizons=(1,), kind="manual")
+    assert first.status == "success"
+
+    with db.session() as session:
+        version = active_model_version(session, "ADRO", 1)
+        assert version is not None
+        version.artifact_path = r"C:\SMT_7\PRATAAA\models\ADRO\LSTM_ADRO_Target_1.h5"
+
+    second = refresh(["ADRO"], horizons=(1,), kind="manual")
+
+    assert second.status == "success"
+    assert len(second.predictions) == 1
+    with db.session() as session:
+        version = active_model_version(session, "ADRO", 1)
+        assert version is not None
+        assert version.artifact_path == str(config.artifact_file("ADRO", 1))
 
 
 def test_a_scheduled_run_on_a_weekend_is_skipped_without_fetching(
@@ -90,3 +109,4 @@ def test_unsupported_input_is_rejected(reference_assets):
         refresh(["ADRO"], horizons=(3,), kind="manual")
     with pytest.raises(ValueError):
         refresh(["TIDAKADA"], horizons=(1,), kind="manual")
+

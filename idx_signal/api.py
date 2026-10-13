@@ -57,6 +57,11 @@ DESCRIPTION = (
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
+def _artifact_filename(path: str) -> str:
+    """Get a model filename from paths persisted on any operating system."""
+    return path.replace("\\", "/").rsplit("/", 1)[-1]
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     from .storage import ensure_reference_data
@@ -199,7 +204,7 @@ def signals(symbol: str, session: Session = Depends(get_session)) -> SignalsResp
                 warnings=row.warnings,
                 created_at=row.created_at,
                 model_version_id=row.model_version_id,
-                model_artifact=Path(version.artifact_path).name if version else None,
+                model_artifact=_artifact_filename(version.artifact_path) if version else None,
                 model_metrics=version.metrics if version else None,
             )
         )
@@ -263,7 +268,7 @@ def prediction_history(
         query.order_by(Prediction.data_as_of.desc(), Prediction.id.desc()).limit(limit)
     ).all()
     versions = {
-        version.id: Path(version.artifact_path).name
+        version.id: _artifact_filename(version.artifact_path)
         for version in session.scalars(
             select(ModelVersion).where(ModelVersion.symbol == normalized)
         )
@@ -421,3 +426,4 @@ async def unhandled(_, exc: Exception):  # pragma: no cover - framework-level sa
     return JSONResponse(
         status_code=500, content={"detail": "Terjadi galat di sisi layanan. Coba lagi sebentar."}
     )
+
