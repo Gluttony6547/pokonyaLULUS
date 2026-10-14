@@ -18,6 +18,8 @@ Asia/Jakarta, skipping weekends and recorded IDX holidays.
 - Latest buy, hold, or sell label per horizon, with the reference close, the
   model's projected price, the threshold it was compared against, the projected
   target date, and the model version.
+- Intraday quote and timestamp for the selected stock during market hours. The
+  quote is for monitoring; model signals continue to use completed daily closes.
 - Out-of-distribution and corporate-action warnings attached to the signal that
   triggered them, plus a note when a target date crosses a calendar year the
   holiday table does not cover.

@@ -7,18 +7,38 @@ from datetime import date, datetime, timedelta, timezone
 import numpy as np
 import pandas as pd
 import pytest
+import sys
+from types import SimpleNamespace
 
 from idx_signal import config
 from idx_signal.market_data import (
     MarketDataUnavailable,
     bar_is_still_forming,
     drop_forming_bar,
+    fetch_intraday_quote,
     normalize,
     validation_issues,
     window_has_corporate_action,
 )
 
 WIB = config.WIB
+
+
+def test_fetch_intraday_quote_returns_latest_price_and_wib_timestamp(monkeypatch):
+    frame = pd.DataFrame(
+        {("Close", "ADRO.JK"): [2520.0, 2530.0]},
+        index=pd.DatetimeIndex(
+            ["2026-10-14 07:25:00+00:00", "2026-10-14 07:26:00+00:00"],
+            name="Datetime",
+        ),
+    )
+    frame.columns = pd.MultiIndex.from_tuples(frame.columns)
+    monkeypatch.setitem(sys.modules, "yfinance", SimpleNamespace(download=lambda *args, **kwargs: frame))
+
+    price, observed_at = fetch_intraday_quote("ADRO")
+
+    assert price == 2530.0
+    assert observed_at.isoformat() == "2026-10-14T14:26:00+07:00"
 
 
 def test_empty_frame_is_rejected():

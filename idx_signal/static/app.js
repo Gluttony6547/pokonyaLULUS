@@ -10,6 +10,11 @@ const state = {
   historyHorizon: "1",
   versions: [],
   jobsTimer: null,
+  quoteTimer: null,
+  quoteLoading: false,
+  quote: null,
+  referenceClose: null,
+  referenceCloseDate: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -69,6 +74,31 @@ function formatTimestamp(value) {
     hour: "2-digit",
     minute: "2-digit",
   })} WIB`;
+}
+
+function dateInWib(value) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: WIB,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(value));
+  const fields = Object.fromEntries(parts.map(({ type, value: part }) => [type, part]));
+  return `${fields.year}-${fields.month}-${fields.day}`;
+}
+
+function isWibMarketOpen() {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: WIB,
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date()).map(({ type, value }) => [type, value]),
+  );
+  const minuteOfDay = Number(parts.hour) * 60 + Number(parts.minute);
+  return !["Sat", "Sun"].includes(parts.weekday) && minuteOfDay >= 9 * 60 && minuteOfDay < 16 * 60 + 15;
 }
 
 function updateStatusLabel(status) {
@@ -194,6 +224,10 @@ function renderRail() {
 
 function selectSymbol(symbol) {
   state.symbol = symbol;
+  state.quote = null;
+  state.quoteLoading = false;
+  state.referenceClose = null;
+  state.referenceCloseDate = null;
   renderRail();
   const stock = state.symbols.find((item) => item.symbol === symbol);
   $("signals-sub").textContent = stock
@@ -209,9 +243,9 @@ function renderSignals(payload) {
   $("signals-sub").textContent = stock
     ? `${stock.name}${stock.sector ? ` · ${formatSector(stock.sector)}` : ""}`
     : payload.symbol;
-  $("reference-price").textContent = payload.last_close
-    ? `Harga terakhir ${formatPrice(payload.last_close)} · ${formatDate(payload.last_price_date)}`
-    : "Harga belum tersedia";
+  state.referenceClose = payload.last_close;
+  state.referenceCloseDate = payload.last_price_date;
+  renderReferencePrice();
 
   if (!payload.signals.length) {
     $("signal-body").hidden = true;
@@ -261,7 +295,8 @@ function renderSignals(payload) {
     payload.signals[0].data_as_of,
   );
   $("signal-note").textContent =
-    `Harga terakhir yang dipakai: ${formatDate(newest)}. Tanggal perkiraan dihitung dari hari ini. ` +
+    `Sinyal memakai harga penutupan ${formatDate(newest)}; harga intrahari hanya untuk pantauan. ` +
+    "Tanggal perkiraan dihitung dari hari ini. " +
     `${payload.signals.length} dari ${HORIZONS.length} rentang waktu memiliki sinyal.`;
   $("signal-body").hidden = false;
 }
@@ -281,6 +316,39 @@ async function loadSignals() {
       error.message,
       { label: "Coba lagi", run: () => loadSignals() },
     );
+  }
+}
+
+function renderReferencePrice() {
+  const quote = state.quote;
+  const quoteIsToday = quote && dateInWib(quote.observed_at) === dateInWib(new Date());
+  if (quoteIsToday) {
+    $("reference-price").textContent =
+      `Harga intrahari ${formatPrice(quote.price)} · ${formatTimestamp(quote.observed_at)}`;
+    return;
+  }
+  $("reference-price").textContent = state.referenceClose !== null
+    ? `Harga penutupan ${formatPrice(state.referenceClose)} · ${formatDate(state.referenceCloseDate)}`
+    : "Harga belum tersedia";
+}
+
+async function loadQuote() {
+  if (!state.symbol || state.quoteLoading) return;
+  state.quoteLoading = true;
+  const symbol = state.symbol;
+  try {
+    const quote = await api(`/quotes/${symbol}`);
+    if (state.symbol === symbol) {
+      state.quote = quote;
+      renderReferencePrice();
+    }
+  } catch {
+    if (state.symbol === symbol) {
+      state.quote = null;
+      renderReferencePrice();
+    }
+  } finally {
+    state.quoteLoading = false;
   }
 }
 
@@ -709,7 +777,7 @@ async function loadHealth() {
 /* Panels that follow the selected ticker, kept apart from the system panels so a
    ticker change does not refetch the service-wide status. */
 async function loadSymbolPanels() {
-  await Promise.all([loadSignals(), loadPrices(), loadHistory(), loadVersions()]);
+  await Promise.all([loadQuote(), loadSignals(), loadPrices(), loadHistory(), loadVersions()]);
 }
 
 async function loadAll() {
@@ -754,6 +822,10 @@ async function boot() {
   }
   selectSymbol(state.symbols[0].symbol);
   await Promise.all([loadHealth(), loadUpdates(), loadJobs()]);
+  if (state.quoteTimer) window.clearInterval(state.quoteTimer);
+  state.quoteTimer = window.setInterval(() => {
+    if (isWibMarketOpen()) loadQuote();
+  }, 60_000);
 }
 
 document.addEventListener("DOMContentLoaded", boot);

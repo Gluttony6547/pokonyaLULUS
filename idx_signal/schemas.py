@@ -16,6 +16,13 @@ class StockOut(BaseModel):
     last_close: float | None = None
 
 
+class IntradayQuoteOut(BaseModel):
+    symbol: str
+    price: float
+    observed_at: datetime
+    source: str = "Yahoo Finance"
+
+
 class UpdateLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

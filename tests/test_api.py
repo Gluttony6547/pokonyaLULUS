@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 from fastapi.testclient import TestClient
 
 from idx_signal import db
 from idx_signal.api import app
+from idx_signal.market_data import MarketDataUnavailable
 from idx_signal.refresh import ensure_model_versions
 from idx_signal.storage import ensure_reference_data
 
@@ -23,6 +26,37 @@ def test_dashboard_and_assets_are_served(client):
     assert "Sinyal" in root.text
     assert client.get("/static/app.css").status_code == 200
     assert client.get("/static/app.js").status_code == 200
+
+
+def test_intraday_quote_endpoint_returns_price_and_timestamp(client, monkeypatch):
+    observed_at = datetime(2026, 10, 14, 7, 26, tzinfo=timezone.utc)
+    monkeypatch.setattr("idx_signal.api.fetch_intraday_quote", lambda symbol: (2530.0, observed_at))
+
+    response = client.get("/api/v1/quotes/ADRO")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "symbol": "ADRO",
+        "price": 2530.0,
+        "observed_at": "2026-10-14T07:26:00Z",
+        "source": "Yahoo Finance",
+    }
+
+
+def test_intraday_quote_endpoint_rejects_unsupported_ticker(client):
+    assert client.get("/api/v1/quotes/NOPE").status_code == 404
+
+
+def test_intraday_quote_endpoint_reports_provider_unavailable(client, monkeypatch):
+    def unavailable(_symbol):
+        raise MarketDataUnavailable("Kuotasi intrahari belum tersedia.")
+
+    monkeypatch.setattr("idx_signal.api.fetch_intraday_quote", unavailable)
+
+    response = client.get("/api/v1/quotes/ADRO")
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Kuotasi intrahari belum tersedia."
 
 
 def test_health_reports_the_backend_and_artifact_inventory(client, reference_assets):

@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import date, datetime, timezone
+from functools import lru_cache
 
 import numpy as np
 import pandas as pd
@@ -87,6 +88,45 @@ def fetch_daily_ohlcv(
             if attempt + 1 < attempts:
                 time.sleep(0.5)
     raise MarketDataUnavailable(f"Yahoo Finance gagal untuk {symbol}.JK: {last_error}")
+
+
+def fetch_intraday_quote(symbol: str) -> tuple[float, datetime]:
+    """Return Yahoo's newest one-minute price bar and its timestamp."""
+    return _fetch_intraday_quote_cached(symbol.upper(), int(time.monotonic() // 30))
+
+
+@lru_cache(maxsize=32)
+def _fetch_intraday_quote_cached(symbol: str, _cache_bucket: int) -> tuple[float, datetime]:
+    try:
+        import yfinance as yf
+
+        frame = yf.download(
+            f"{symbol}.JK",
+            period="1d",
+            interval="1m",
+            auto_adjust=False,
+            progress=False,
+            prepost=False,
+            threads=False,
+            timeout=12,
+        )
+    except Exception as error:
+        raise MarketDataUnavailable(f"Kuotasi intrahari {symbol}.JK tidak tersedia: {error}") from error
+
+    if frame is None or frame.empty or "Close" not in frame.columns.get_level_values(0):
+        raise MarketDataUnavailable(f"Yahoo Finance belum menyediakan kuotasi intrahari {symbol}.JK.")
+
+    close = frame["Close"]
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+    close = pd.to_numeric(close, errors="coerce").dropna()
+    if close.empty or float(close.iloc[-1]) <= 0:
+        raise MarketDataUnavailable(f"Yahoo Finance belum menyediakan harga valid untuk {symbol}.JK.")
+
+    observed_at = pd.Timestamp(close.index[-1])
+    if observed_at.tzinfo is None:
+        observed_at = observed_at.tz_localize("UTC")
+    return float(close.iloc[-1]), observed_at.tz_convert(config.WIB).to_pydatetime()
 
 
 def bar_is_still_forming(trade_date: date, now: datetime) -> bool:

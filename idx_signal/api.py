@@ -22,12 +22,14 @@ from sqlalchemy.orm import Session
 
 from . import __version__, config, db, training
 from .indicators import compute_indicators
+from .market_data import MarketDataUnavailable, fetch_intraday_quote
 from .model_registry import artifact_inventory
 from .models import DailyPrice, ModelVersion, Prediction, Stock
 from .refresh import RefreshInProgress, refresh
 from .scheduler import due_slot, last_success_utc, run_scheduled
 from .schemas import (
     HealthOut,
+    IntradayQuoteOut,
     ModelVersionOut,
     PriceResponse,
     PriceRow,
@@ -152,6 +154,16 @@ def list_stocks(session: Session = Depends(get_session)) -> list[StockOut]:
         )
         for stock in session.scalars(select(Stock).order_by(Stock.symbol))
     ]
+
+
+@app.get("/api/v1/quotes/{symbol}", response_model=IntradayQuoteOut, tags=["market data"])
+def intraday_quote(symbol: str) -> IntradayQuoteOut:
+    normalized = _require_symbol(symbol)
+    try:
+        price, observed_at = fetch_intraday_quote(normalized)
+    except MarketDataUnavailable as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    return IntradayQuoteOut(symbol=normalized, price=price, observed_at=observed_at)
 
 
 @app.get("/api/v1/stocks/{symbol}/signals", response_model=SignalsResponse, tags=["signals"])
