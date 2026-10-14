@@ -200,8 +200,7 @@ def refresh(
 ) -> RefreshReport:
     """Fetch EOD data for the requested tickers and store their signals.
 
-    `today` exists so the exchange-calendar branch can be exercised for any
-    date without waiting for one.
+    `today` fixes the WIB date for exchange-calendar and target-date checks.
     """
     symbol_list = tuple(symbols) if symbols else config.SUPPORTED_SYMBOLS
     horizon_list = tuple(int(horizon) for horizon in horizons)
@@ -292,14 +291,15 @@ def refresh(
                     signal, change_pct = classify_return(predicted, current, horizon)
                     z = out_of_distribution_z(current, scalers.input_mean, scalers.input_scale)
                     ood = is_out_of_distribution(z)
-                    projected = target_date(data_as_of, horizon, holidays)
+                    forecast_date = max(data_as_of, session_date)
+                    projected = target_date(forecast_date, horizon, holidays)
                     row_warnings: list[str] = []
                     if ood:
                         row_warnings.append(
                             f"harga acuan {z:.2f} simpangan baku dari rata-rata data latih, "
                             "di luar sebaran yang dikenal model"
                         )
-                    if crosses_unknown_year(data_as_of, horizon, known_years):
+                    if crosses_unknown_year(forecast_date, horizon, known_years):
                         row_warnings.append(
                             "tanggal target masih perkiraan, kalender libur bursa belum "
                             "mencakup tahun tersebut"

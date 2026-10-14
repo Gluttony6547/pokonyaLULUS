@@ -38,6 +38,21 @@ def test_manual_refresh_writes_prices_predictions_and_a_log(offline_fetch, refer
         assert row["model_version_id"] > 0
 
 
+@pytest.mark.parametrize(
+    ("today", "expected_target"),
+    ((date(2026, 10, 13), date(2026, 10, 14)), (date(2026, 10, 17), date(2026, 10, 19))),
+)
+def test_target_date_uses_today_and_skips_weekends(
+    offline_fetch, reference_assets, today, expected_target
+):
+    report = refresh(["ADRO"], horizons=(1,), kind="manual", today=today)
+
+    assert report.status == "success"
+    row = report.predictions[0]
+    assert row["data_as_of"] < today
+    assert row["target_date"] == expected_target
+
+
 def test_running_twice_updates_in_place(offline_fetch, reference_assets):
     refresh(["ADRO"], horizons=(1,), kind="manual")
     refresh(["ADRO"], horizons=(1,), kind="manual")

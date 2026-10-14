@@ -9,7 +9,9 @@ and its output is not investment advice.
 Signals are computed from the 50 saved `LSTM_<SYMBOL>_Target_<H>.h5` artifacts,
 the same files the research notebooks produced. Each signal records the data
 date it was made from and the model version behind it, so any row on the
-dashboard can be traced back to a file and a session.
+dashboard can be traced back to a file and a session. The input date records the
+last complete price session; the target date is counted from the refresh date in
+Asia/Jakarta, skipping weekends and recorded IDX holidays.
 
 ## What the dashboard offers
 

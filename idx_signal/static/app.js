@@ -26,7 +26,7 @@ const escapeHtml = (value) =>
 const priceFormat = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 });
 
 function formatPrice(value) {
-  return value === null || value === undefined ? "tidak ada" : priceFormat.format(value);
+  return value === null || value === undefined ? "belum tersedia" : priceFormat.format(value);
 }
 
 function formatRatio(value) {
@@ -34,7 +34,7 @@ function formatRatio(value) {
 }
 
 function formatPercent(value) {
-  if (value === null || value === undefined) return "tidak ada";
+  if (value === null || value === undefined) return "belum tersedia";
   const sign = value > 0 ? "+" : value < 0 ? "\u2212" : "";
   return `${sign}${Math.abs(value).toFixed(2).replace(".", ",")}%`;
 }
@@ -43,7 +43,12 @@ function formatDate(value) {
   if (!value) return "belum ada";
   const parts = String(value).slice(0, 10).split("-");
   const date = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])));
-  return date.toLocaleDateString("id-ID", { day: "numeric", month: "short", year: "numeric" });
+  return date.toLocaleDateString("id-ID", {
+    timeZone: WIB,
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 function parseTimestamp(value) {
@@ -64,6 +69,27 @@ function formatTimestamp(value) {
     hour: "2-digit",
     minute: "2-digit",
   })} WIB`;
+}
+
+function updateStatusLabel(status) {
+  return ({
+    success: "berhasil",
+    partial: "sebagian berhasil",
+    failed: "gagal",
+    skipped: "dilewati",
+    queued: "dalam antrean",
+    running: "sedang berjalan",
+  })[status] || status;
+}
+
+function formatSector(sector) {
+  return ({
+    Energy: "Energi",
+    "Basic Materials": "Bahan baku",
+    Financials: "Keuangan",
+    "Communication Services": "Jasa komunikasi",
+    Utilities: "Utilitas",
+  })[sector] || sector;
 }
 
 function horizonLabel(days) {
@@ -171,7 +197,7 @@ function selectSymbol(symbol) {
   renderRail();
   const stock = state.symbols.find((item) => item.symbol === symbol);
   $("signals-sub").textContent = stock
-    ? `${stock.name}${stock.sector ? `, ${stock.sector}` : ""}`
+    ? `${stock.name}${stock.sector ? ` · ${formatSector(stock.sector)}` : ""}`
     : "";
   loadSymbolPanels();
 }
@@ -181,11 +207,11 @@ function selectSymbol(symbol) {
 function renderSignals(payload) {
   const stock = state.symbols.find((item) => item.symbol === payload.symbol);
   $("signals-sub").textContent = stock
-    ? `${stock.name}${stock.sector ? `, ${stock.sector}` : ""}`
+    ? `${stock.name}${stock.sector ? ` · ${formatSector(stock.sector)}` : ""}`
     : payload.symbol;
   $("reference-price").textContent = payload.last_close
-    ? `Harga acuan ${formatPrice(payload.last_close)} pada ${formatDate(payload.last_price_date)}`
-    : "Harga acuan belum tersedia";
+    ? `Harga terakhir ${formatPrice(payload.last_close)} · ${formatDate(payload.last_price_date)}`
+    : "Harga belum tersedia";
 
   if (!payload.signals.length) {
     $("signal-body").hidden = true;
@@ -193,8 +219,8 @@ function renderSignals(payload) {
       "signal-state",
       "",
       `Belum ada sinyal untuk ${payload.symbol}.`,
-      "Jalankan pembaruan data, lalu model akan menghasilkan sinyal untuk lima horizon.",
-      { label: "Perbarui data sekarang", run: () => runRefresh() },
+      "Perbarui harga untuk menghitung sinyal pada lima rentang waktu.",
+      { label: "Perbarui harga", run: () => runRefresh() },
     );
     return;
   }
@@ -206,13 +232,13 @@ function renderSignals(payload) {
     const ratio = Number(signal.return_pct);
     const row = document.createElement("tr");
     row.innerHTML = `
-      <td data-label="Horizon"><span class="horizon">${horizonLabel(signal.horizon_days)}</span>
+      <td data-label="Rentang waktu"><span class="horizon">${horizonLabel(signal.horizon_days)}</span>
         <span class="artifact">${escapeHtml(formatDate(signal.data_as_of))}</span></td>
       <td data-label="Sinyal"><span class="chip" data-signal="${escapeHtml(signal.signal)}">${escapeHtml(signal.signal)}</span></td>
-      <td data-label="Perkiraan">${formatPrice(signal.predicted_price)}</td>
+      <td data-label="Harga perkiraan">${formatPrice(signal.predicted_price)}</td>
       <td data-label="Perubahan"><span class="${deltaClass(ratio)}">${formatPercent(ratio)}</span>
         <span class="artifact">ambang ${formatPercent(signal.threshold_pct)}</span></td>
-      <td data-label="Tanggal target">${formatDate(signal.target_date)}</td>
+      <td data-label="Perkiraan tanggal">${formatDate(signal.target_date)}</td>
       <td data-label="Model"><span class="artifact">${escapeHtml(signal.model_artifact || "belum terdaftar")}</span></td>
     `;
     rows.appendChild(row);
@@ -235,14 +261,14 @@ function renderSignals(payload) {
     payload.signals[0].data_as_of,
   );
   $("signal-note").textContent =
-    `Semua angka di atas dihitung dari data sampai ${formatDate(newest)}. ` +
-    `${payload.signals.length} dari ${HORIZONS.length} horizon punya sinyal.`;
+    `Harga terakhir yang dipakai: ${formatDate(newest)}. Tanggal perkiraan dihitung dari hari ini. ` +
+    `${payload.signals.length} dari ${HORIZONS.length} rentang waktu memiliki sinyal.`;
   $("signal-body").hidden = false;
 }
 
 async function loadSignals() {
   if (!state.symbol) return;
-  setState("signal-state", "", "Memuat sinyal.", `Menunggu respons untuk ${state.symbol}.`);
+  setState("signal-state", "", "Memuat sinyal…", `Meminta data ${state.symbol}.`);
   try {
     const payload = await api(`/stocks/${state.symbol}/signals`);
     renderSignals(payload);
@@ -251,7 +277,7 @@ async function loadSignals() {
     setState(
       "signal-state",
       "error",
-      "Sinyal tidak bisa dimuat.",
+      "Sinyal belum bisa ditampilkan.",
       error.message,
       { label: "Coba lagi", run: () => loadSignals() },
     );
@@ -268,7 +294,7 @@ function renderChart(payload) {
   facts.innerHTML = "";
 
   if (!payload.rows.length) {
-    caption.textContent = "Belum ada data harga tersimpan untuk saham ini.";
+    caption.textContent = "Belum ada riwayat harga untuk saham ini.";
     return;
   }
 
@@ -383,8 +409,8 @@ function renderHistory(rows) {
     setState(
       "history-state",
       "",
-      "Belum ada riwayat untuk horizon ini.",
-      "Riwayat terisi setiap kali data diperbarui. Coba horizon lain, atau jalankan pembaruan.",
+      "Belum ada sinyal untuk rentang waktu ini.",
+      "Riwayat akan muncul setelah harga diperbarui. Pilih rentang waktu lain atau perbarui harga.",
     );
     return;
   }
@@ -395,13 +421,13 @@ function renderHistory(rows) {
       const ratio = Number(row.return_pct);
       return `
       <tr>
-        <td data-label="Data per">${formatDate(row.data_as_of)}</td>
+        <td data-label="Harga per">${formatDate(row.data_as_of)}</td>
         <td data-label="Sinyal"><span class="chip" data-signal="${escapeHtml(row.signal)}">${escapeHtml(row.signal)}</span></td>
         <td data-label="Harga acuan">${formatPrice(row.last_close)}</td>
-        <td data-label="Perkiraan">${formatPrice(row.predicted_price)}</td>
+        <td data-label="Harga perkiraan">${formatPrice(row.predicted_price)}</td>
         <td data-label="Perubahan"><span class="${deltaClass(ratio)}">${formatPercent(ratio)}</span></td>
-        <td data-label="Tanggal target">${formatDate(row.target_date)}</td>
-        <td data-label="Dibuat">${formatTimestamp(row.created_at)}</td>
+        <td data-label="Perkiraan tanggal">${formatDate(row.target_date)}</td>
+        <td data-label="Waktu dibuat">${formatTimestamp(row.created_at)}</td>
       </tr>`;
     })
     .join("");
@@ -410,7 +436,7 @@ function renderHistory(rows) {
 
 async function loadHistory() {
   if (!state.symbol) return;
-  setState("history-state", "", "Memuat riwayat.", "");
+  setState("history-state", "", "Memuat riwayat…", "");
   try {
     const rows = await api(
       `/predictions/${state.symbol}?horizon_days=${encodeURIComponent(state.historyHorizon)}&limit=24`,
@@ -428,15 +454,15 @@ async function loadHistory() {
 /* Update log */
 
 async function loadUpdates() {
-  setState("updates-state", "", "Memuat riwayat pembaruan.", "");
+  setState("updates-state", "", "Memuat riwayat pembaruan…", "");
   try {
     const rows = await api("/update-logs?limit=10");
     if (!rows.length) {
       setState(
         "updates-state",
         "",
-        "Belum ada pembaruan data tercatat.",
-        "Pembaruan pertama akan muncul di sini setelah dijalankan dari tombol di atas.",
+        "Belum ada catatan pembaruan harga.",
+        "Catatan pembaruan akan muncul di sini setelah kamu memperbarui harga.",
       );
       $("update-list").innerHTML = "";
       return;
@@ -447,8 +473,8 @@ async function loadUpdates() {
         (row) => `
       <li>
         <span class="log-time">${formatTimestamp(row.run_at)}</span>
-        <span class="log-status" data-status="${escapeHtml(row.status)}">${escapeHtml(row.status)}${
-          row.trigger_type === "manual" ? " (manual)" : " (jadwal)"
+        <span class="log-status" data-status="${escapeHtml(row.status)}">${escapeHtml(updateStatusLabel(row.status))}${
+          row.trigger_type === "manual" ? " (manual)" : " · otomatis"
         }</span>
         <span class="log-detail">${row.rows_inserted} baris harga. ${escapeHtml(row.message || "")}</span>
       </li>`,
@@ -471,8 +497,8 @@ function renderVersions(rows) {
     setState(
       "models-state",
       "",
-      "Belum ada versi model terdaftar untuk saham ini.",
-      "Versi acuan terdaftar otomatis saat pembaruan data pertama dijalankan.",
+      "Model untuk saham ini belum tercatat.",
+      "Model acuan akan tercatat saat harga pertama kali diperbarui.",
     );
     return;
   }
@@ -484,7 +510,7 @@ function renderVersions(rows) {
     const origin = (version.config && version.config.source) || "tidak diketahui";
     const row = document.createElement("tr");
     row.innerHTML = `
-      <td data-label="Horizon"><span class="horizon">${horizonLabel(version.horizon_days)}</span></td>
+      <td data-label="Rentang waktu"><span class="horizon">${horizonLabel(version.horizon_days)}</span></td>
       <td data-label="Versi">#${version.id}<br /><span class="artifact">${formatTimestamp(version.trained_at)}</span></td>
       <td data-label="Asal">${escapeHtml(origin === "retrained" ? "latih ulang" : "acuan")}</td>
       <td data-label="Akurasi">${
@@ -554,7 +580,7 @@ function renderJobs(rows) {
       (job) => `
     <li>
       <span class="log-time">${formatTimestamp(job.requested_at)}</span>
-      <span class="log-status" data-status="${escapeHtml(job.status)}">${escapeHtml(job.status)}</span>
+      <span class="log-status" data-status="${escapeHtml(job.status)}">${escapeHtml(updateStatusLabel(job.status))}</span>
       <span class="log-detail">${escapeHtml(job.symbol)} ${horizonLabel(job.horizon_days)}${
         job.error_message ? `: ${escapeHtml(job.error_message)}` : ""
       }${job.model_version_id ? `, versi #${job.model_version_id}` : ""}</span>
@@ -571,7 +597,7 @@ async function loadJobs() {
     if (active) startJobPolling();
     else stopJobPolling();
   } catch (error) {
-    $("jobs-list").innerHTML = `<li><span class="log-time">galat</span><span class="log-status" data-status="failed">failed</span><span class="log-detail">${escapeHtml(error.message)}</span></li>`;
+    $("jobs-list").innerHTML = `<li><span class="log-time">galat</span><span class="log-status" data-status="failed">gagal</span><span class="log-detail">${escapeHtml(error.message)}</span></li>`;
   }
 }
 
@@ -632,17 +658,17 @@ async function runRefresh() {
   const button = $("refresh-button");
   button.disabled = true;
   button.textContent = "Memperbarui";
-  showBanner("warn", "Pembaruan data berjalan.", "Mengambil harga harian dari penyedia dan menghitung ulang sinyal.");
+  showBanner("warn", "Harga sedang diperbarui.", "Mengambil harga terbaru dan menghitung ulang sinyal. Proses ini bisa memakan waktu.");
   try {
     const entry = await api("/update-logs/refresh", { method: "POST" });
     const tone = entry.status === "success" ? "ok" : "warn";
-    showBanner(tone, `Pembaruan selesai dengan status ${entry.status}.`, entry.message);
+    showBanner(tone, `Pembaruan ${updateStatusLabel(entry.status)}.`, entry.message);
     await loadAll();
   } catch (error) {
-    showBanner("error", "Pembaruan data gagal.", error.message);
+    showBanner("error", "Harga belum berhasil diperbarui.", error.message);
   } finally {
     button.disabled = false;
-    button.textContent = "Perbarui data sekarang";
+    button.textContent = "Perbarui harga";
   }
 }
 
@@ -654,13 +680,13 @@ async function loadHealth() {
     const pieces = [];
     if (health.last_update) {
       pieces.push(
-        `Pembaruan terakhir ${formatTimestamp(health.last_update.run_at)} (${health.last_update.status})`,
+        `Terakhir diperbarui ${formatTimestamp(health.last_update.run_at)} (${updateStatusLabel(health.last_update.status)})`,
       );
     } else {
       pieces.push("Belum ada pembaruan data tercatat");
     }
     if (health.pending_slot) {
-      pieces.push(`slot jadwal ${formatTimestamp(health.pending_slot)} masih menunggu`);
+      pieces.push(`Pembaruan otomatis berikutnya: ${formatTimestamp(health.pending_slot)}`);
     }
     $("freshness").textContent = pieces.join(", ");
 
@@ -669,13 +695,13 @@ async function loadHealth() {
     const complete = artifacts.filter(([, count]) => count === HORIZONS.length).length;
     facts.innerHTML = `
       <dt>Penyimpanan</dt><dd>${escapeHtml(health.storage_backend)}</dd>
-      <dt>Baris harga</dt><dd>${priceFormat.format(health.price_rows)}</dd>
-      <dt>Baris sinyal</dt><dd>${priceFormat.format(health.prediction_rows)}</dd>
-      <dt>Berkas model lengkap</dt><dd>${complete} dari ${artifacts.length} emiten</dd>
+      <dt>Catatan harga</dt><dd>${priceFormat.format(health.price_rows)}</dd>
+      <dt>Riwayat sinyal</dt><dd>${priceFormat.format(health.prediction_rows)}</dd>
+      <dt>Model lengkap</dt><dd>${complete} dari ${artifacts.length} emiten</dd>
       <dt>Jadwal pembaruan</dt><dd>16:05 dan 18:00 WIB</dd>
     `;
   } catch (error) {
-    $("freshness").textContent = "Status layanan tidak bisa dimuat.";
+    $("freshness").textContent = "Status aplikasi belum bisa dimuat.";
     $("freshness-facts").innerHTML = `<dt>Galat</dt><dd>${escapeHtml(error.message)}</dd>`;
   }
 }
@@ -707,7 +733,7 @@ async function boot() {
   $("train-form").addEventListener("submit", submitTraining);
   $("refresh-button").addEventListener("click", runRefresh);
 
-  setState("signal-state", "", "Memuat daftar saham.", "Mengambil daftar emiten terdaftar.");
+  setState("signal-state", "", "Memuat daftar saham…", "Menyiapkan pilihan saham.");
   try {
     state.symbols = await api("/stocks");
   } catch (error) {
@@ -721,8 +747,8 @@ async function boot() {
     setState(
       "signal-state",
       "",
-      "Belum ada emiten terdaftar.",
-      "Jalankan perintah seed pada layanan untuk mengisi daftar emiten dan kalender libur bursa.",
+      "Daftar saham masih kosong.",
+      "Daftar saham dan kalender bursa belum disiapkan di server.",
     );
     return;
   }

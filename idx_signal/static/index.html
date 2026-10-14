@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Sinyal IDX, sinyal LSTM untuk sepuluh emiten</title>
+    <title>Sinyal IDX — ringkasan saham</title>
     <meta
       name="description"
-      content="Sinyal Buy, Hold, dan Sell dari model LSTM tersimpan untuk sepuluh emiten IDX pada horizon 1, 5, 10, 20, dan 50 sesi."
+      content="Pantau harga dan sinyal model untuk sepuluh saham pilihan di Bursa Efek Indonesia."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -21,9 +21,9 @@
 
     <header class="topbar">
       <p class="wordmark">Sinyal<abbr title="Bursa Efek Indonesia">IDX</abbr></p>
-      <p class="freshness" id="freshness" aria-live="polite">Memuat data pembaruan terakhir.</p>
+      <p class="freshness" id="freshness" aria-live="polite">Memeriksa pembaruan terakhir…</p>
       <div class="topbar-actions">
-        <button type="button" class="button" id="refresh-button">Perbarui data sekarang</button>
+        <button type="button" class="button" id="refresh-button">Perbarui harga</button>
         <button type="button" class="button button-quiet" id="theme-toggle" aria-pressed="false">
           Mode gelap
         </button>
@@ -37,7 +37,7 @@
         <div class="panel-head">
           <div>
             <h1 id="signals-heading">Sinyal terbaru</h1>
-            <p class="panel-sub" id="signals-sub">Memuat sinyal.</p>
+            <p class="panel-sub" id="signals-sub">Memuat sinyal…</p>
           </div>
           <p class="reference-price" id="reference-price"></p>
         </div>
@@ -49,15 +49,15 @@
         <div class="signal-body" id="signal-body" hidden>
           <table class="signal-table">
             <caption class="visually-hidden">
-              Sinyal per horizon untuk saham terpilih
+              Sinyal saham terpilih menurut rentang waktu
             </caption>
             <thead>
               <tr>
-                <th scope="col">Horizon</th>
+                <th scope="col">Rentang waktu</th>
                 <th scope="col">Sinyal</th>
-                <th scope="col">Perkiraan</th>
+                <th scope="col">Harga perkiraan</th>
                 <th scope="col">Perubahan</th>
-                <th scope="col">Tanggal target</th>
+                <th scope="col">Perkiraan tanggal</th>
                 <th scope="col">Model</th>
               </tr>
             </thead>
@@ -67,20 +67,19 @@
         </div>
 
         <p class="disclaimer">
-          Sinyal ini keluaran model statistik untuk pendukung keputusan, bukan saran investasi.
-          Model dilatih pada data historis, sehingga akurasi masa lalu tidak menjamin hasil di
-          masa depan.
+          Sinyal ini berasal dari model statistik dan hanya menjadi bahan pertimbangan, bukan ajakan membeli atau menjual.
+          Model belajar dari data historis; hasil sebelumnya tidak menjamin hasil berikutnya.
         </p>
       </section>
 
       <div class="context">
         <section class="card" aria-labelledby="freshness-heading">
-          <h2 id="freshness-heading">Kesegaran data</h2>
+          <h2 id="freshness-heading">Status data</h2>
           <dl class="facts" id="freshness-facts"></dl>
         </section>
 
         <section class="card" aria-labelledby="chart-heading">
-          <h2 id="chart-heading">Harga penutup, 180 sesi terakhir</h2>
+          <h2 id="chart-heading">Harga penutupan · 180 sesi terakhir</h2>
           <figure class="chart">
             <svg
               id="price-chart"
@@ -95,11 +94,11 @@
         </section>
 
         <section class="card" aria-labelledby="context-heading">
-          <h2 id="context-heading">Indikator sesi terakhir</h2>
+          <h2 id="context-heading">Indikator terbaru</h2>
           <dl class="facts facts-inline" id="indicator-facts"></dl>
           <p class="card-note">
-            Dihitung ulang dari data tersimpan dengan rumus yang sama seperti pipeline riset.
-            Indikator tidak dipakai model untuk memprediksi, hanya penjelas.
+            Dihitung dari harga yang tersimpan menggunakan rumus riset yang sama.
+            Model tidak memakai indikator ini untuk membuat prediksi; indikator hanya memberi konteks.
           </p>
         </section>
       </div>
@@ -109,11 +108,11 @@
           <div>
             <h2 id="history-heading">Riwayat sinyal</h2>
             <p class="panel-sub">
-              Setiap baris menyimpan tanggal data yang dipakai, jadi satu sinyal bisa ditelusuri.
+              Tanggal harga dan waktu pembuatan tercatat agar setiap sinyal bisa ditelusuri.
             </p>
           </div>
           <label class="field">
-            <span>Horizon</span>
+            <span>Rentang waktu</span>
             <select id="history-horizon"></select>
           </label>
         </div>
@@ -123,13 +122,13 @@
             <caption class="visually-hidden">Riwayat sinyal untuk saham terpilih</caption>
             <thead>
               <tr>
-                <th scope="col">Data per</th>
+                <th scope="col">Harga per</th>
                 <th scope="col">Sinyal</th>
                 <th scope="col">Harga acuan</th>
-                <th scope="col">Perkiraan</th>
+                <th scope="col">Harga perkiraan</th>
                 <th scope="col">Perubahan</th>
-                <th scope="col">Tanggal target</th>
-                <th scope="col">Dibuat</th>
+                <th scope="col">Perkiraan tanggal</th>
+                <th scope="col">Waktu dibuat</th>
               </tr>
             </thead>
             <tbody id="history-rows"></tbody>
@@ -142,7 +141,7 @@
           <div>
             <h2 id="updates-heading">Riwayat pembaruan data</h2>
             <p class="panel-sub">
-              Satu baris per percobaan, termasuk yang gagal dan yang dilewati pada hari libur bursa.
+              Catatan di bawah memuat setiap percobaan, termasuk yang gagal atau dilewati saat bursa tutup.
             </p>
           </div>
         </div>
@@ -155,20 +154,19 @@
           <div>
             <h2 id="models-heading">Model dan pelatihan</h2>
             <p class="panel-sub">
-              Versi acuan adalah berkas LSTM yang sudah terverifikasi. Melatih ulang menghasilkan
-              versi kandidat yang belum dipakai sampai diaktifkan.
+              Model acuan sudah diverifikasi. Model hasil pelatihan ulang menjadi kandidat dan baru digunakan setelah diaktifkan.
             </p>
           </div>
         </div>
 
         <form class="train-form" id="train-form">
           <label class="field">
-            <span>Horizon</span>
+            <span>Rentang waktu</span>
             <select id="train-horizon"></select>
           </label>
           <label class="checkbox">
             <input type="checkbox" id="train-force" />
-            <span>Latih ulang walau model sudah ada</span>
+            <span>Tetap latih ulang meski model sudah tersedia</span>
           </label>
           <button type="submit" class="button" id="train-submit">Latih model</button>
         </form>
@@ -181,12 +179,12 @@
             </caption>
             <thead>
               <tr>
-                <th scope="col">Horizon</th>
+                <th scope="col">Rentang waktu</th>
                 <th scope="col">Versi</th>
                 <th scope="col">Asal</th>
                 <th scope="col">Akurasi</th>
                 <th scope="col">Presisi</th>
-                <th scope="col">Recall</th>
+                <th scope="col">Sensitivitas</th>
                 <th scope="col">F1</th>
                 <th scope="col">Berkas</th>
                 <th scope="col">Status</th>
@@ -204,11 +202,11 @@
     <footer class="footer">
       <p>
         Model: 50 berkas LSTM dari riset acuan (<code>CODE/Price Prediction Model</code>), diverifikasi
-        ulang terhadap keluaran riset pada setiap rilis. Data harga: Yahoo Finance untuk kode
-        <code>.JK</code>, diperbarui pada hari bursa setelah penutupan.
+        ulang terhadap keluaran riset pada setiap rilis. Harga diambil dari Yahoo Finance dengan kode
+        <code>.JK</code>, diperbarui setelah sesi bursa berakhir.
       </p>
       <p>
-        Sinyal bukan saran investasi. Aplikasi tidak melakukan transaksi dan tidak mengelola
+        Sinyal bukan saran investasi. Aplikasi tidak bertransaksi atau mengelola
         portofolio.
       </p>
     </footer>
