@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from secrets import compare_digest
 
@@ -21,14 +21,17 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import __version__, config, db, training
+from .historical import HistoricalDateError, reference_bounds, signals_for_date
 from .indicators import compute_indicators
 from .market_data import MarketDataUnavailable, fetch_intraday_quote
-from .model_registry import artifact_inventory
+from .model_registry import ModelUnavailable, artifact_filename, artifact_inventory
 from .models import DailyPrice, ModelVersion, Prediction, Stock
 from .refresh import RefreshInProgress, refresh
 from .scheduler import due_slot, last_success_utc, run_scheduled
 from .schemas import (
     HealthOut,
+    HistoricalSignalOut,
+    HistoricalSignalsOut,
     IntradayQuoteOut,
     ModelVersionOut,
     PriceResponse,
@@ -57,11 +60,6 @@ DESCRIPTION = (
 )
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
-
-
-def _artifact_filename(path: str) -> str:
-    """Get a model filename from paths persisted on any operating system."""
-    return path.replace("\\", "/").rsplit("/", 1)[-1]
 
 
 @asynccontextmanager
@@ -141,19 +139,32 @@ def list_stocks(session: Session = Depends(get_session)) -> list[StockOut]:
         row.symbol: (row.trade_date, row.close)
         for row in session.execute(select(newest).where(newest.c.rank == 1))
     }
-    return [
-        StockOut(
-            symbol=stock.symbol,
-            name=stock.name,
-            sector=stock.sector,
-            is_active=stock.is_active,
-            last_price_date=latest.get(stock.symbol, (None, None))[0],
-            last_close=(
-                float(latest[stock.symbol][1]) if stock.symbol in latest else None
-            ),
+    oldest = dict(
+        session.execute(
+            select(DailyPrice.symbol, func.min(DailyPrice.trade_date)).group_by(DailyPrice.symbol)
+        ).all()
+    )
+    rows: list[StockOut] = []
+    for stock in session.scalars(select(Stock).order_by(Stock.symbol)):
+        last_date, last_close = latest.get(stock.symbol, (None, None))
+        first_date = oldest.get(stock.symbol)
+        rows.append(
+            StockOut(
+                symbol=stock.symbol,
+                name=stock.name,
+                sector=stock.sector,
+                is_active=stock.is_active,
+                first_price_date=first_date,
+                last_price_date=last_date,
+                last_close=float(last_close) if last_close is not None else None,
+                earliest_reference_date=(
+                    reference_bounds(first_date, last_date)[0]
+                    if first_date is not None and last_date is not None
+                    else None
+                ),
+            )
         )
-        for stock in session.scalars(select(Stock).order_by(Stock.symbol))
-    ]
+    return rows
 
 
 @app.get("/api/v1/quotes/{symbol}", response_model=IntradayQuoteOut, tags=["market data"])
@@ -216,7 +227,7 @@ def signals(symbol: str, session: Session = Depends(get_session)) -> SignalsResp
                 warnings=row.warnings,
                 created_at=row.created_at,
                 model_version_id=row.model_version_id,
-                model_artifact=_artifact_filename(version.artifact_path) if version else None,
+                model_artifact=artifact_filename(version.artifact_path) if version else None,
                 model_metrics=version.metrics if version else None,
             )
         )
@@ -227,6 +238,51 @@ def signals(symbol: str, session: Session = Depends(get_session)) -> SignalsResp
         last_price_date=price_date,
         last_close=float(last_close) if last_close is not None else None,
         signals=signals_out,
+    )
+
+
+@app.get(
+    "/api/v1/stocks/{symbol}/signals/historical",
+    response_model=HistoricalSignalsOut,
+    tags=["signals"],
+)
+def historical_signals(
+    symbol: str,
+    reference_date: str = Query(alias="date", description="Tanggal acuan, format YYYY-MM-DD"),
+    session: Session = Depends(get_session),
+) -> HistoricalSignalsOut:
+    """Recompute the five horizons from the closes up to a chosen session.
+
+    Kept apart from the stored-signal endpoint so that one keeps returning
+    exactly what the refresh pipeline wrote.
+    """
+    normalized = _require_symbol(symbol)
+    try:
+        parsed = date.fromisoformat(reference_date)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Tanggal acuan harus berformat YYYY-MM-DD, bukan {reference_date!r}.",
+        ) from error
+
+    try:
+        result = signals_for_date(session, normalized, parsed)
+    except HistoricalDateError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except ModelUnavailable as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+    stock = session.get(Stock, normalized)
+    return HistoricalSignalsOut(
+        symbol=normalized,
+        name=stock.name if stock else normalized,
+        reference_date=result.reference_date,
+        reference_close=result.reference_close,
+        first_price_date=result.first_price_date,
+        last_price_date=result.last_price_date,
+        earliest_reference_date=result.earliest_reference_date,
+        signals=[HistoricalSignalOut.model_validate(row) for row in result.signals],
+        warnings=result.warnings,
     )
 
 
@@ -280,7 +336,7 @@ def prediction_history(
         query.order_by(Prediction.data_as_of.desc(), Prediction.id.desc()).limit(limit)
     ).all()
     versions = {
-        version.id: _artifact_filename(version.artifact_path)
+        version.id: artifact_filename(version.artifact_path)
         for version in session.scalars(
             select(ModelVersion).where(ModelVersion.symbol == normalized)
         )

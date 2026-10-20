@@ -15,6 +15,9 @@ const state = {
   quote: null,
   referenceClose: null,
   referenceCloseDate: null,
+  referenceDate: null,
+  dateBounds: { min: "", max: "" },
+  signalRequest: 0,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -141,7 +144,9 @@ async function api(path, options) {
   const payload = text ? JSON.parse(text) : null;
   if (!response.ok) {
     const detail = payload && payload.detail ? payload.detail : `Permintaan gagal (${response.status}).`;
-    throw new Error(detail);
+    const error = new Error(typeof detail === "string" ? detail : `Permintaan gagal (${response.status}).`);
+    error.status = response.status;
+    throw error;
   }
   return payload;
 }
@@ -228,6 +233,11 @@ function selectSymbol(symbol) {
   state.quoteLoading = false;
   state.referenceClose = null;
   state.referenceCloseDate = null;
+  state.referenceDate = null;
+  $("reference-date").value = "";
+  $("latest-signals").hidden = true;
+  setDateMessage("");
+  applyDateBounds();
   renderRail();
   const stock = state.symbols.find((item) => item.symbol === symbol);
   $("signals-sub").textContent = stock
@@ -236,25 +246,76 @@ function selectSymbol(symbol) {
   loadSymbolPanels();
 }
 
+/* Reference date */
+
+function currentStock() {
+  return state.symbols.find((item) => item.symbol === state.symbol) || null;
+}
+
+function applyDateBounds() {
+  const stock = currentStock();
+  if (!stock) return;
+  const input = $("reference-date");
+  const min = stock.earliest_reference_date || "";
+  const max = stock.last_price_date || "";
+  state.dateBounds = { min, max };
+  input.min = min;
+  input.max = max;
+  input.disabled = !max;
+  $("date-hint").textContent = max
+    ? `Sinyal dihitung ulang dari harga penutupan sampai tanggal ini. Data ${stock.symbol} tersedia ${formatDate(min)} sampai ${formatDate(max)}; kosongkan untuk sinyal terbaru.`
+    : `Belum ada harga tersimpan untuk ${stock.symbol}. Perbarui harga untuk mengisi rentang tanggal.`;
+}
+
+function setDateMessage(message) {
+  $("date-message").textContent = message || "";
+  $("reference-date").setAttribute("aria-invalid", message ? "true" : "false");
+}
+
+async function applyReferenceDate(value) {
+  const { min, max } = state.dateBounds;
+  if (value && (value < min || value > max)) {
+    setDateMessage(
+      `Tanggal ${formatDate(value)} di luar rentang data ${formatDate(min)} sampai ${formatDate(max)}.`,
+    );
+    return;
+  }
+  setDateMessage("");
+  state.referenceDate = value || null;
+  $("latest-signals").hidden = !state.referenceDate;
+  await loadSignals();
+}
+
 /* Signal panel */
 
-function renderSignals(payload) {
-  const stock = state.symbols.find((item) => item.symbol === payload.symbol);
+function renderSignals(payload, historical) {
+  const stock = currentStock();
+  $("signals-heading").textContent = historical ? "Sinyal historis" : "Sinyal terbaru";
   $("signals-sub").textContent = stock
     ? `${stock.name}${stock.sector ? ` · ${formatSector(stock.sector)}` : ""}`
     : payload.symbol;
-  state.referenceClose = payload.last_close;
-  state.referenceCloseDate = payload.last_price_date;
+  state.referenceClose = historical ? payload.reference_close : payload.last_close;
+  state.referenceCloseDate = historical ? payload.reference_date : payload.last_price_date;
   renderReferencePrice();
+
+  const warnings = payload.warnings || [];
+  $("signal-warnings").innerHTML = warnings
+    .map((warning) => `<li>${escapeHtml(warning)}</li>`)
+    .join("");
+  $("signal-warnings").hidden = warnings.length === 0;
 
   if (!payload.signals.length) {
     $("signal-body").hidden = true;
     setState(
       "signal-state",
       "",
-      `Belum ada sinyal untuk ${payload.symbol}.`,
-      "Perbarui harga untuk menghitung sinyal pada lima rentang waktu.",
-      { label: "Perbarui harga", run: () => runRefresh() },
+      historical
+        ? `Tidak ada sinyal pada ${formatDate(payload.reference_date)}.`
+        : `Belum ada sinyal untuk ${payload.symbol}.`,
+      historical
+        ? "Pilih tanggal lain atau kembali ke sinyal terbaru."
+        : "Perbarui harga untuk menghitung sinyal pada lima rentang waktu.",
+      historical ? null : { label: "Perbarui harga", run: () => runRefresh() },
     );
     return;
   }
@@ -294,21 +355,43 @@ function renderSignals(payload) {
     (latest, item) => (item.data_as_of > latest ? item.data_as_of : latest),
     payload.signals[0].data_as_of,
   );
-  $("signal-note").textContent =
-    `Sinyal memakai harga penutupan ${formatDate(newest)}; harga intrahari hanya untuk pantauan. ` +
-    "Tanggal perkiraan dihitung dari hari ini. " +
-    `${payload.signals.length} dari ${HORIZONS.length} rentang waktu memiliki sinyal.`;
+  $("signal-note").textContent = historical
+    ? `Dihitung ulang dari harga penutupan ${formatDate(newest)} memakai model yang tersimpan. ` +
+      "Tanggal target mengikuti sesi bursa IDX; hasil ini tidak disimpan sebagai sinyal operasional."
+    : `Sinyal memakai harga penutupan ${formatDate(newest)}; harga intrahari hanya untuk pantauan. ` +
+      "Tanggal perkiraan dihitung dari hari ini. " +
+      `${payload.signals.length} dari ${HORIZONS.length} rentang waktu memiliki sinyal.`;
   $("signal-body").hidden = false;
 }
 
 async function loadSignals() {
   if (!state.symbol) return;
-  setState("signal-state", "", "Memuat sinyal…", `Meminta data ${state.symbol}.`);
+  const symbol = state.symbol;
+  const reference = state.referenceDate;
+  const request = ++state.signalRequest;
+  const historical = Boolean(reference);
+  setState(
+    "signal-state",
+    "",
+    historical ? "Menghitung ulang sinyal…" : "Memuat sinyal…",
+    historical
+      ? `Memakai harga penutupan sampai ${formatDate(reference)}.`
+      : `Meminta data ${symbol}.`,
+  );
   try {
-    const payload = await api(`/stocks/${state.symbol}/signals`);
-    renderSignals(payload);
+    const payload = historical
+      ? await api(`/stocks/${symbol}/signals/historical?date=${encodeURIComponent(reference)}`)
+      : await api(`/stocks/${symbol}/signals`);
+    if (request !== state.signalRequest) return;
+    renderSignals(payload, historical);
   } catch (error) {
+    if (request !== state.signalRequest) return;
     $("signal-body").hidden = true;
+    if (historical && error.status === 422) {
+      hideState("signal-state");
+      setDateMessage(error.message);
+      return;
+    }
     setState(
       "signal-state",
       "error",
@@ -320,6 +403,13 @@ async function loadSignals() {
 }
 
 function renderReferencePrice() {
+  if (state.referenceDate) {
+    $("reference-price").textContent =
+      state.referenceClose === null
+        ? ""
+        : `Harga acuan ${formatPrice(state.referenceClose)} · ${formatDate(state.referenceCloseDate)}`;
+    return;
+  }
   const quote = state.quote;
   const quoteIsToday = quote && dateInWib(quote.observed_at) === dateInWib(new Date());
   if (quoteIsToday) {
@@ -333,7 +423,7 @@ function renderReferencePrice() {
 }
 
 async function loadQuote() {
-  if (!state.symbol || state.quoteLoading) return;
+  if (!state.symbol || state.quoteLoading || state.referenceDate) return;
   state.quoteLoading = true;
   const symbol = state.symbol;
   try {
@@ -781,7 +871,15 @@ async function loadSymbolPanels() {
 }
 
 async function loadAll() {
+  // A refresh can move the newest price date, which bounds the date control.
+  await loadStocks().catch(() => {});
   await Promise.all([loadHealth(), loadUpdates(), loadJobs(), loadSymbolPanels()]);
+}
+
+async function loadStocks() {
+  state.symbols = await api("/stocks");
+  renderRail();
+  applyDateBounds();
 }
 
 async function boot() {
@@ -800,10 +898,17 @@ async function boot() {
   });
   $("train-form").addEventListener("submit", submitTraining);
   $("refresh-button").addEventListener("click", runRefresh);
+  $("reference-date").addEventListener("change", (event) => {
+    applyReferenceDate(event.target.value || null);
+  });
+  $("latest-signals").addEventListener("click", () => {
+    $("reference-date").value = "";
+    applyReferenceDate(null);
+  });
 
   setState("signal-state", "", "Memuat daftar saham…", "Menyiapkan pilihan saham.");
   try {
-    state.symbols = await api("/stocks");
+    await loadStocks();
   } catch (error) {
     setState("signal-state", "error", "Daftar saham tidak bisa dimuat.", error.message, {
       label: "Coba lagi",

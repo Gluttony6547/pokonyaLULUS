@@ -12,8 +12,11 @@ class StockOut(BaseModel):
     name: str
     sector: str | None = None
     is_active: bool
+    first_price_date: date | None = None
     last_price_date: date | None = None
     last_close: float | None = None
+    # Oldest reference date the historical lookup accepts for this ticker.
+    earliest_reference_date: date | None = None
 
 
 class IntradayQuoteOut(BaseModel):
@@ -74,6 +77,39 @@ class SignalsResponse(BaseModel):
     last_price_date: date | None = None
     last_close: float | None = None
     signals: list[SignalOut]
+
+
+class HistoricalSignalOut(BaseModel):
+    """One horizon recomputed at a reference date; no stored prediction behind it."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    symbol: str
+    horizon_days: int
+    data_as_of: date
+    target_date: date
+    reference_close: float
+    predicted_price: float
+    return_pct: float
+    threshold_pct: float
+    signal: str
+    ood_z: float
+    ood_flag: bool
+    warnings: str | None = None
+    model_artifact: str | None = None
+    model_version_id: int | None = None
+
+
+class HistoricalSignalsOut(BaseModel):
+    symbol: str
+    name: str
+    reference_date: date
+    reference_close: float
+    first_price_date: date
+    last_price_date: date
+    earliest_reference_date: date
+    signals: list[HistoricalSignalOut]
+    warnings: list[str]
 
 
 class PriceRow(BaseModel):

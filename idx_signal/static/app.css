@@ -211,7 +211,8 @@ abbr {
   color: var(--muted);
 }
 
-.field select {
+.field select,
+.field input[type="date"] {
   font: inherit;
   font-size: 0.9rem;
   color: var(--ink);
@@ -220,6 +221,20 @@ abbr {
   border-radius: var(--radius-sm);
   padding: 8px 9px;
   min-height: 44px;
+  width: 100%;
+  color-scheme: light;
+}
+
+[data-theme="dark"] .field input[type="date"] {
+  color-scheme: dark;
+}
+
+/* Focus lands on the date widget's shadow segments, so :focus and
+   :focus-visible never match the host element. */
+.field input[type="date"]:focus-within {
+  border-color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .checkbox {
@@ -235,6 +250,37 @@ abbr {
   width: 18px;
   height: 18px;
   accent-color: var(--accent);
+}
+
+/* Reference date control */
+
+.date-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 16px;
+  padding: 14px 0 4px;
+}
+
+.date-control .field {
+  flex: 0 1 12rem;
+}
+
+.date-hint {
+  flex: 1 1 12rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+  max-width: 60ch;
+}
+
+.date-message {
+  flex: 1 1 100%;
+  color: var(--sell-ink);
+  font-size: 0.85rem;
+}
+
+.date-message:empty {
+  display: none;
 }
 
 /* Banner */
@@ -473,6 +519,13 @@ table {
   font-size: 0.84rem;
 }
 
+.signal-warnings {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--warn-ink);
+  font-size: 0.82rem;
+}
+
 .signal-state {
   margin-top: 14px;
   padding: 14px 16px;
@@ -668,6 +721,14 @@ table {
   }
 
   .topbar-actions .button {
+    flex: 1 1 auto;
+  }
+
+  .date-control .field {
+    flex: 1 1 100%;
+  }
+
+  .date-control .button {
     flex: 1 1 auto;
   }
 

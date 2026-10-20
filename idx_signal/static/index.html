@@ -44,6 +44,22 @@
 
         <div class="rail" id="ticker-rail" role="group" aria-label="Pilih saham"></div>
 
+        <div class="date-control">
+          <label class="field" for="reference-date">
+            <span>Tanggal acuan</span>
+            <input
+              type="date"
+              id="reference-date"
+              aria-describedby="date-hint date-message"
+            />
+          </label>
+          <p class="date-hint" id="date-hint"></p>
+          <button type="button" class="button button-quiet" id="latest-signals" hidden>
+            Kembali ke sinyal terbaru
+          </button>
+          <p class="date-message" id="date-message" role="alert"></p>
+        </div>
+
         <div class="signal-state" id="signal-state" aria-live="polite"></div>
 
         <div class="signal-body" id="signal-body" hidden>
@@ -64,6 +80,7 @@
             <tbody id="signal-rows"></tbody>
           </table>
           <p class="signal-note" id="signal-note"></p>
+          <ul class="signal-warnings" id="signal-warnings" hidden></ul>
         </div>
 
         <p class="disclaimer">

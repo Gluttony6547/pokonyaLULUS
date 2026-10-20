@@ -199,6 +199,40 @@ def latest_price_date(session: Session, symbol: str) -> date | None:
     )
 
 
+def price_date_range(session: Session, symbol: str) -> tuple[date | None, date | None]:
+    """First and last stored session for a symbol."""
+    first, last = session.execute(
+        select(func.min(DailyPrice.trade_date), func.max(DailyPrice.trade_date)).where(
+            DailyPrice.symbol == symbol
+        )
+    ).one()
+    return first, last
+
+
+def nth_price_date(session: Session, symbol: str, sessions: int) -> date | None:
+    """Date of the `sessions`-th oldest session, named so an early reference
+    date can suggest the first date whose model window fits."""
+    if sessions < 1:
+        raise ValueError("sessions must be positive")
+    return session.scalar(
+        select(DailyPrice.trade_date)
+        .where(DailyPrice.symbol == symbol)
+        .order_by(DailyPrice.trade_date)
+        .offset(sessions - 1)
+        .limit(1)
+    )
+
+
+def _price_frame(rows) -> pd.DataFrame:
+    if not rows:
+        return pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume"])
+    frame = pd.DataFrame(rows, columns=["date", "open", "high", "low", "close", "volume"])
+    frame["volume"] = frame["volume"].astype("int64")
+    for column in ("open", "high", "low", "close"):
+        frame[column] = frame[column].astype(float)
+    return frame.sort_values("date").reset_index(drop=True)
+
+
 def price_frame(session: Session, symbol: str, limit: int = 400) -> pd.DataFrame:
     """The newest `limit` bars for a symbol, oldest first."""
     rows = session.execute(
@@ -208,13 +242,21 @@ def price_frame(session: Session, symbol: str, limit: int = 400) -> pd.DataFrame
         .order_by(DailyPrice.trade_date.desc())
         .limit(limit)
     ).all()
-    if not rows:
-        return pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume"])
-    frame = pd.DataFrame(rows, columns=["date", "open", "high", "low", "close", "volume"])
-    frame["volume"] = frame["volume"].astype("int64")
-    for column in ("open", "high", "low", "close"):
-        frame[column] = frame[column].astype(float)
-    return frame.sort_values("date").reset_index(drop=True)
+    return _price_frame(rows)
+
+
+def price_frame_until(
+    session: Session, symbol: str, end_date: date, limit: int = 400
+) -> pd.DataFrame:
+    """The newest `limit` bars at or before `end_date`, oldest first."""
+    rows = session.execute(
+        select(DailyPrice.trade_date, DailyPrice.open, DailyPrice.high, DailyPrice.low,
+               DailyPrice.close, DailyPrice.volume)
+        .where(DailyPrice.symbol == symbol, DailyPrice.trade_date <= end_date)
+        .order_by(DailyPrice.trade_date.desc())
+        .limit(limit)
+    ).all()
+    return _price_frame(rows)
 
 
 def last_successful_update(session: Session) -> DataUpdateLog | None:

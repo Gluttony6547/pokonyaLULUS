@@ -11,6 +11,9 @@ from idx_signal.models import DailyPrice, ModelVersion
 from idx_signal.storage import (
     active_model_version,
     log_update,
+    nth_price_date,
+    price_date_range,
+    price_frame_until,
     register_model_version,
     store_prices,
 )
@@ -39,6 +42,23 @@ def test_store_prices_inserts_then_updates_in_place(prices):
             .limit(1)
         )
     assert float(last) == 9999.0
+
+
+def test_price_queries_stop_at_the_requested_date(prices):
+    with db.session() as session:
+        store_prices(session, "ADRO", prices)
+    cutoff = prices.iloc[100]["date"]
+
+    with db.session() as session:
+        frame = price_frame_until(session, "ADRO", cutoff, limit=50)
+        span = price_date_range(session, "ADRO")
+        hundredth = nth_price_date(session, "ADRO", 101)
+
+    assert len(frame) == 50
+    assert frame.iloc[-1]["date"] == cutoff
+    assert list(frame["date"]) == sorted(frame["date"])
+    assert span == (prices.iloc[0]["date"], prices.iloc[-1]["date"])
+    assert hundredth == cutoff
 
 
 def test_registering_the_same_artifact_twice_keeps_one_version():

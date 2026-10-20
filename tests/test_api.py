@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 
-from idx_signal import db
+from idx_signal import config, db
 from idx_signal.api import app
 from idx_signal.market_data import MarketDataUnavailable
 from idx_signal.refresh import ensure_model_versions
-from idx_signal.storage import ensure_reference_data
+from idx_signal.storage import ensure_reference_data, store_prices
 
 
 @pytest.fixture
@@ -119,6 +119,94 @@ def test_manual_update_populates_the_dashboard(client, offline_fetch, reference_
     versions = client.get("/api/v1/model-versions/ADRO").json()
     assert len(versions) == 5
     assert all(version["is_active"] for version in versions)
+
+
+def store_history(prices, symbol: str = "ADRO") -> None:
+    with db.session() as session:
+        store_prices(session, symbol, prices)
+
+
+def test_stocks_report_the_stored_date_range(client, prices):
+    store_history(prices)
+
+    adro = next(row for row in client.get("/api/v1/stocks").json() if row["symbol"] == "ADRO")
+
+    assert adro["first_price_date"] == str(prices.iloc[0]["date"])
+    assert adro["last_price_date"] == str(prices.iloc[-1]["date"])
+    assert adro["earliest_reference_date"] == adro["first_price_date"]
+
+
+def test_historical_signals_are_recomputed_for_a_stored_session(client, prices, reference_assets):
+    store_history(prices)
+    reference = prices.iloc[300]["date"]
+
+    response = client.get(f"/api/v1/stocks/ADRO/signals/historical?date={reference}")
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["symbol"] == "ADRO"
+    assert payload["reference_date"] == str(reference)
+    assert payload["reference_close"] == pytest.approx(float(prices.iloc[300]["close"]))
+    assert payload["first_price_date"] == str(prices.iloc[0]["date"])
+    assert payload["last_price_date"] == str(prices.iloc[-1]["date"])
+    assert [row["horizon_days"] for row in payload["signals"]] == list(config.HORIZONS)
+
+    first = payload["signals"][0]
+    assert first["data_as_of"] == str(reference)
+    assert first["model_artifact"] == "LSTM_ADRO_Target_1.h5"
+    assert first["signal"] in {"BUY", "HOLD", "SELL"}
+    assert date.fromisoformat(first["target_date"]) > reference
+
+
+def test_historical_signals_leave_the_stored_signals_alone(client, prices, reference_assets):
+    store_history(prices)
+    reference = prices.iloc[300]["date"]
+
+    assert client.get("/api/v1/predictions/ADRO").json() == []
+    assert client.get(f"/api/v1/stocks/ADRO/signals/historical?date={reference}").status_code == 200
+
+    assert client.get("/api/v1/predictions/ADRO").json() == []
+    assert client.get("/api/v1/stocks/ADRO/signals").json()["signals"] == []
+
+
+def test_historical_signals_reject_a_malformed_date(client):
+    response = client.get("/api/v1/stocks/ADRO/signals/historical?date=17-10-2026")
+
+    assert response.status_code == 422
+    assert "YYYY-MM-DD" in response.json()["detail"]
+
+
+def test_historical_signals_reject_a_date_after_the_newest_price(client, prices, reference_assets):
+    store_history(prices)
+    newest = prices.iloc[-1]["date"]
+
+    response = client.get(
+        f"/api/v1/stocks/ADRO/signals/historical?date={newest + timedelta(days=1)}"
+    )
+
+    assert response.status_code == 422
+    assert str(newest) in response.json()["detail"]
+
+
+def test_historical_signals_reject_a_date_without_a_price(client, prices, reference_assets):
+    store_history(prices)
+    reference = prices.iloc[300]["date"]
+    saturday = next(
+        reference + timedelta(days=offset)
+        for offset in range(1, 8)
+        if (reference + timedelta(days=offset)).weekday() >= 5
+    )
+
+    response = client.get(f"/api/v1/stocks/ADRO/signals/historical?date={saturday}")
+
+    assert response.status_code == 422
+    assert "Tidak ada harga penutupan" in response.json()["detail"]
+
+
+def test_historical_signals_reject_an_unknown_ticker(client):
+    response = client.get("/api/v1/stocks/TSLA/signals/historical?date=2024-06-03")
+
+    assert response.status_code == 404
 
 
 def test_training_reuses_the_model_that_already_exists(client, reference_assets):

@@ -191,6 +191,11 @@ def predict_price(
     return predicted
 
 
+def artifact_filename(path: str) -> str:
+    """Model filename from a path persisted on any operating system."""
+    return path.replace("\\", "/").rsplit("/", 1)[-1]
+
+
 @lru_cache(maxsize=4)
 def artifact_inventory(symbols: tuple[str, ...] = config.SUPPORTED_SYMBOLS) -> dict[str, int]:
     """How many artifacts resolve per ticker (5 when the set is complete)."""
