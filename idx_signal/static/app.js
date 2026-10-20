@@ -387,9 +387,9 @@ async function loadSignals() {
   const reference = state.referenceDate;
   const request = ++state.signalRequest;
   const historical = Boolean(reference);
+  $("signal-body").hidden = true;
   clearReferencePrice();
   renderActiveDate("memuat…");
-  if (historical) $("signal-body").hidden = true;
   setState(
     "signal-state",
     "",
