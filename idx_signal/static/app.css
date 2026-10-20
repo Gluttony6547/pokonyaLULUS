@@ -266,8 +266,19 @@ abbr {
   flex: 0 1 12rem;
 }
 
-.date-hint {
+.date-copy {
   flex: 1 1 12rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.date-active {
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.date-hint {
   color: var(--muted);
   font-size: 0.82rem;
   max-width: 60ch;
@@ -724,7 +735,8 @@ table {
     flex: 1 1 auto;
   }
 
-  .date-control .field {
+  .date-control .field,
+  .date-copy {
     flex: 1 1 100%;
   }
 

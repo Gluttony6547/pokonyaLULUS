@@ -16,7 +16,6 @@ const state = {
   referenceClose: null,
   referenceCloseDate: null,
   referenceDate: null,
-  dateBounds: { min: "", max: "" },
   signalRequest: 0,
 };
 
@@ -258,7 +257,6 @@ function applyDateBounds() {
   const input = $("reference-date");
   const min = stock.earliest_reference_date || "";
   const max = stock.last_price_date || "";
-  state.dateBounds = { min, max };
   input.min = min;
   input.max = max;
   input.disabled = !max;
@@ -272,12 +270,29 @@ function setDateMessage(message) {
   $("reference-date").setAttribute("aria-invalid", message ? "true" : "false");
 }
 
+function renderActiveDate(value) {
+  $("date-active").textContent = `Tanggal acuan aktif: ${value}`;
+}
+
+function clearReferencePrice() {
+  state.referenceClose = null;
+  state.referenceCloseDate = null;
+  renderReferencePrice();
+}
+
 async function applyReferenceDate(value) {
-  const { min, max } = state.dateBounds;
+  const stock = currentStock();
+  const min = stock?.earliest_reference_date || "";
+  const max = stock?.last_price_date || "";
   if (value && (value < min || value > max)) {
     setDateMessage(
       `Tanggal ${formatDate(value)} di luar rentang data ${formatDate(min)} sampai ${formatDate(max)}.`,
     );
+    $("signal-body").hidden = true;
+    hideState("signal-state");
+    $("latest-signals").hidden = false;
+    clearReferencePrice();
+    renderActiveDate("tidak tersedia");
     return;
   }
   setDateMessage("");
@@ -288,7 +303,8 @@ async function applyReferenceDate(value) {
 
 /* Signal panel */
 
-function renderSignals(payload, historical) {
+function renderSignals(payload) {
+  const historical = Boolean(state.referenceDate);
   const stock = currentStock();
   $("signals-heading").textContent = historical ? "Sinyal historis" : "Sinyal terbaru";
   $("signals-sub").textContent = stock
@@ -297,6 +313,7 @@ function renderSignals(payload, historical) {
   state.referenceClose = historical ? payload.reference_close : payload.last_close;
   state.referenceCloseDate = historical ? payload.reference_date : payload.last_price_date;
   renderReferencePrice();
+  renderActiveDate(formatDate(historical ? payload.reference_date : payload.last_price_date));
 
   const warnings = payload.warnings || [];
   $("signal-warnings").innerHTML = warnings
@@ -370,6 +387,9 @@ async function loadSignals() {
   const reference = state.referenceDate;
   const request = ++state.signalRequest;
   const historical = Boolean(reference);
+  clearReferencePrice();
+  renderActiveDate("memuat…");
+  if (historical) $("signal-body").hidden = true;
   setState(
     "signal-state",
     "",
@@ -383,10 +403,12 @@ async function loadSignals() {
       ? await api(`/stocks/${symbol}/signals/historical?date=${encodeURIComponent(reference)}`)
       : await api(`/stocks/${symbol}/signals`);
     if (request !== state.signalRequest) return;
-    renderSignals(payload, historical);
+    renderSignals(payload);
   } catch (error) {
     if (request !== state.signalRequest) return;
     $("signal-body").hidden = true;
+    clearReferencePrice();
+    renderActiveDate("tidak tersedia");
     if (historical && error.status === 422) {
       hideState("signal-state");
       setDateMessage(error.message);
