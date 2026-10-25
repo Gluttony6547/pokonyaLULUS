@@ -11,6 +11,8 @@ from sqlalchemy import func, select
 from idx_signal import config, db
 from idx_signal.historical import (
     HistoricalDateError,
+    first_usable_reference_date,
+    format_date_id,
     reference_bounds,
     signals_for_date,
 )
@@ -106,7 +108,8 @@ def test_a_short_window_names_the_first_usable_date(prices, reference_assets):
     needed = max(config.HORIZONS)
     message = str(error.value)
     assert f"model butuh {needed} sesi" in message
-    assert str(prices.iloc[needed - 1]["date"]) in message
+    assert format_date_id(prices.iloc[needed - 1]["date"]) in message
+    assert str(prices.iloc[needed - 1]["date"]) not in message
 
 
 def test_dates_outside_the_allowed_range_are_rejected(prices, reference_assets):
@@ -115,11 +118,15 @@ def test_dates_outside_the_allowed_range_are_rejected(prices, reference_assets):
 
     with pytest.raises(HistoricalDateError) as future:
         lookup(newest + timedelta(days=7))
-    assert str(newest) in str(future.value)
+    assert format_date_id(newest) in str(future.value)
+    assert str(newest) not in str(future.value)
 
     with pytest.raises(HistoricalDateError) as older:
         lookup(prices.iloc[0]["date"] - timedelta(days=1))
-    assert str(prices.iloc[0]["date"]) in str(older.value)
+    with db.session() as session:
+        usable = first_usable_reference_date(session, "ADRO")
+    assert format_date_id(usable) in str(older.value)
+    assert str(prices.iloc[0]["date"]) not in str(older.value)
 
 
 def test_a_historical_lookup_never_writes_a_prediction(prices, reference_assets):
@@ -148,3 +155,85 @@ def test_a_close_outside_the_training_range_is_flagged(prices, reference_assets)
 def test_the_reference_range_is_capped_at_ten_years():
     first, last = date(2010, 1, 4), date(2026, 10, 16)
     assert reference_bounds(first, last) == (date(2016, 10, 16), last)
+
+
+def test_the_picker_minimum_is_the_first_session_that_fills_the_window(
+    prices, reference_assets
+):
+    store(prices)
+    with db.session() as session:
+        usable = first_usable_reference_date(session, "ADRO")
+
+    assert usable == prices.iloc[max(config.HORIZONS) - 1]["date"]
+    result = lookup(usable)
+    assert result.first_usable_reference_date == usable
+    assert len(result.signals) == len(config.HORIZONS)
+
+
+def test_a_realized_target_shows_the_actual_close_and_direction(prices, reference_assets):
+    store(prices)
+    reference = prices.iloc[300]["date"]
+    closes = dict(zip(prices["date"], prices["close"]))
+
+    result = lookup(reference)
+
+    for row in result.signals:
+        assert row.outcome_status == "realized"
+        assert row.actual_date == row.target_date
+        assert row.actual_close == pytest.approx(float(closes[row.target_date]))
+        assert row.actual_signal in {"BUY", "HOLD", "SELL"}
+        assert row.direction_correct is (row.actual_signal == row.signal)
+        expected = (row.actual_close - row.predicted_price) / row.predicted_price * 100
+        assert row.prediction_error_pct == pytest.approx(expected)
+    assert result.scorecard.realized == len(result.signals)
+    assert result.scorecard.direction_total == len(result.signals)
+    assert result.scorecard.mean_abs_error_pct is not None
+
+
+def test_a_target_after_the_newest_price_is_pending(prices, reference_assets):
+    store(prices)
+
+    result = lookup(prices.iloc[-1]["date"])
+
+    assert all(row.outcome_status == "pending" for row in result.signals)
+    assert all(row.actual_close is None for row in result.signals)
+    assert result.scorecard.realized == 0
+    assert result.scorecard.pending == len(result.signals)
+
+
+def test_a_missing_target_is_marked_no_price(prices, reference_assets):
+    reference = prices.iloc[300]["date"]
+    with db.session() as session:
+        holidays, _ = load_holidays(session)
+    target = target_date(reference, 1, holidays)
+    gap_end = target + timedelta(days=7)
+    modified = prices[~((prices["date"] >= target) & (prices["date"] <= gap_end))].copy()
+    store(modified)
+
+    result = lookup(reference)
+
+    first = next(row for row in result.signals if row.horizon_days == 1)
+    assert first.outcome_status == "no_price"
+    assert first.actual_close is None
+    assert result.scorecard.no_price >= 1
+
+
+def test_a_corporate_action_in_the_outcome_window_is_not_scored(
+    prices, reference_assets
+):
+    reference = prices.iloc[300]["date"]
+    with db.session() as session:
+        holidays, _ = load_holidays(session)
+    target = target_date(reference, 1, holidays)
+    modified = prices.copy()
+    mask = modified["date"] == target
+    modified.loc[mask, "close"] = modified.loc[mask, "close"] * 2
+    store(modified)
+
+    result = lookup(reference)
+
+    first = next(row for row in result.signals if row.horizon_days == 1)
+    assert first.outcome_status == "corporate_action"
+    assert first.direction_correct is None
+    assert result.scorecard.corporate_action >= 1
+    assert result.scorecard.direction_total == result.scorecard.realized

@@ -51,6 +51,7 @@
               type="date"
               id="reference-date"
               aria-describedby="date-hint date-message"
+              disabled
             />
           </label>
           <div class="date-copy">
@@ -66,6 +67,8 @@
         <div class="signal-state" id="signal-state" aria-live="polite"></div>
 
         <div class="signal-body" id="signal-body" hidden>
+          <p class="scorecard-summary" id="scorecard-summary" hidden></p>
+          <p class="historical-note" id="historical-note" hidden></p>
           <table class="signal-table">
             <caption class="visually-hidden">
               Sinyal saham terpilih menurut rentang waktu
@@ -76,6 +79,9 @@
                 <th scope="col">Sinyal</th>
                 <th scope="col">Harga perkiraan</th>
                 <th scope="col">Perubahan</th>
+                <th scope="col" class="outcome-col">Aktual</th>
+                <th scope="col" class="outcome-col">Selisih</th>
+                <th scope="col" class="outcome-col">Arah</th>
                 <th scope="col">Perkiraan tanggal</th>
                 <th scope="col">Model</th>
               </tr>

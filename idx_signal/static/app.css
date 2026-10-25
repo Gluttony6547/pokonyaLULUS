@@ -433,6 +433,7 @@ abbr {
 
 .signal-body {
   margin-top: 16px;
+  overflow-x: auto;
 }
 
 table {
@@ -450,6 +451,21 @@ table {
   padding: 0 10px 8px 0;
   border-bottom: 1px solid var(--rule);
   white-space: nowrap;
+}
+
+/* Outcome headers can wrap; nine columns need the second line more than the
+   one-line label. */
+.signal-table th {
+  white-space: normal;
+  padding-right: 8px;
+}
+
+.signal-table td {
+  padding-right: 8px;
+}
+
+#signals[data-mode="latest"] .outcome-col {
+  display: none;
 }
 
 .signal-table td,
@@ -524,10 +540,32 @@ table {
   padding-top: 12px;
 }
 
+.scorecard-summary,
+.historical-note {
+  margin: 0 0 12px;
+  color: var(--muted);
+  font-size: 0.85rem;
+  max-width: 70ch;
+}
+
+.historical-note {
+  margin-top: -6px;
+}
+
 .signal-note {
   margin-top: 14px;
   color: var(--muted);
   font-size: 0.84rem;
+}
+
+.outcome {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.outcome[data-correct="true"] {
+  color: var(--ink);
+  font-weight: 500;
 }
 
 .signal-warnings {
@@ -710,7 +748,7 @@ table {
 
 /* Empty and loading states keep their own line so they never look like data. */
 
-@media (max-width: 1000px) {
+@media (max-width: 1240px) {
   .layout {
     grid-template-columns: minmax(0, 1fr);
     padding: 16px 16px 32px;

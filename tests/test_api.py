@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from idx_signal import config, db
 from idx_signal.api import app
+from idx_signal.historical import format_date_id
 from idx_signal.market_data import MarketDataUnavailable
 from idx_signal.refresh import ensure_model_versions
 from idx_signal.storage import ensure_reference_data, store_prices
@@ -74,6 +75,8 @@ def test_stocks_are_listed_with_their_public_identity(client):
     adro = next(row for row in rows if row["symbol"] == "ADRO")
     assert adro["name"] == "Adaro Energy Indonesia Tbk"
     assert adro["last_close"] is None
+    assert adro["first_usable_reference_date"] is None
+    assert adro["price_session_count"] == 0
 
 
 def test_signals_start_empty_and_say_nothing_was_skipped(client, reference_assets):
@@ -134,6 +137,10 @@ def test_stocks_report_the_stored_date_range(client, prices):
     assert adro["first_price_date"] == str(prices.iloc[0]["date"])
     assert adro["last_price_date"] == str(prices.iloc[-1]["date"])
     assert adro["earliest_reference_date"] == adro["first_price_date"]
+    assert adro["first_usable_reference_date"] == str(
+        prices.iloc[max(config.HORIZONS) - 1]["date"]
+    )
+    assert adro["price_session_count"] == len(prices)
 
 
 def test_historical_signals_are_recomputed_for_a_stored_session(client, prices, reference_assets):
@@ -149,6 +156,10 @@ def test_historical_signals_are_recomputed_for_a_stored_session(client, prices, 
     assert payload["reference_close"] == pytest.approx(float(prices.iloc[300]["close"]))
     assert payload["first_price_date"] == str(prices.iloc[0]["date"])
     assert payload["last_price_date"] == str(prices.iloc[-1]["date"])
+    assert payload["first_usable_reference_date"] == str(
+        prices.iloc[max(config.HORIZONS) - 1]["date"]
+    )
+    assert payload["scorecard"]["realized"] >= 1
     assert [row["horizon_days"] for row in payload["signals"]] == list(config.HORIZONS)
 
     first = payload["signals"][0]
@@ -156,6 +167,29 @@ def test_historical_signals_are_recomputed_for_a_stored_session(client, prices, 
     assert first["model_artifact"] == "LSTM_ADRO_Target_1.h5"
     assert first["signal"] in {"BUY", "HOLD", "SELL"}
     assert date.fromisoformat(first["target_date"]) > reference
+    assert first["outcome_status"] == "realized"
+    assert first["actual_close"] is not None
+    assert first["actual_date"] == first["target_date"]
+    assert first["direction_correct"] in {True, False}
+
+
+def test_historical_signals_accept_the_first_usable_date(client, prices, reference_assets):
+    store_history(prices)
+    usable = prices.iloc[max(config.HORIZONS) - 1]["date"]
+    before = prices.iloc[max(config.HORIZONS) - 2]["date"]
+
+    accepted = client.get(
+        f"/api/v1/stocks/ADRO/signals/historical?date={usable}"
+    )
+    rejected = client.get(
+        f"/api/v1/stocks/ADRO/signals/historical?date={before}"
+    )
+
+    assert accepted.status_code == 200, accepted.text
+    assert rejected.status_code == 422
+    detail = rejected.json()["detail"]
+    assert format_date_id(usable) in detail
+    assert str(before) not in detail
 
 
 def test_historical_signals_leave_the_stored_signals_alone(client, prices, reference_assets):
@@ -185,7 +219,9 @@ def test_historical_signals_reject_a_date_after_the_newest_price(client, prices,
     )
 
     assert response.status_code == 422
-    assert str(newest) in response.json()["detail"]
+    detail = response.json()["detail"]
+    assert format_date_id(newest) in detail
+    assert str(newest) not in detail
 
 
 def test_historical_signals_reject_a_date_without_a_price(client, prices, reference_assets):
@@ -200,7 +236,10 @@ def test_historical_signals_reject_a_date_without_a_price(client, prices, refere
     response = client.get(f"/api/v1/stocks/ADRO/signals/historical?date={saturday}")
 
     assert response.status_code == 422
-    assert "Tidak ada harga penutupan" in response.json()["detail"]
+    detail = response.json()["detail"]
+    assert "Tidak ada harga penutupan" in detail
+    assert format_date_id(saturday) in detail
+    assert str(saturday) not in detail
 
 
 def test_historical_signals_reject_an_unknown_ticker(client):

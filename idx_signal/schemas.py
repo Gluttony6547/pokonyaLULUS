@@ -17,6 +17,9 @@ class StockOut(BaseModel):
     last_close: float | None = None
     # Oldest reference date the historical lookup accepts for this ticker.
     earliest_reference_date: date | None = None
+    # First session with enough closes for every horizon; the picker's minimum.
+    first_usable_reference_date: date | None = None
+    price_session_count: int = 0
 
 
 class IntradayQuoteOut(BaseModel):
@@ -98,6 +101,24 @@ class HistoricalSignalOut(BaseModel):
     warnings: str | None = None
     model_artifact: str | None = None
     model_version_id: int | None = None
+    actual_close: float | None = None
+    actual_date: date | None = None
+    actual_return_pct: float | None = None
+    actual_signal: str | None = None
+    prediction_error_pct: float | None = None
+    direction_correct: bool | None = None
+    outcome_status: str = "pending"
+    outcome_approximate: bool = False
+
+
+class ScorecardOut(BaseModel):
+    realized: int
+    pending: int
+    no_price: int
+    corporate_action: int
+    direction_correct: int
+    direction_total: int
+    mean_abs_error_pct: float | None = None
 
 
 class HistoricalSignalsOut(BaseModel):
@@ -108,7 +129,9 @@ class HistoricalSignalsOut(BaseModel):
     first_price_date: date
     last_price_date: date
     earliest_reference_date: date
+    first_usable_reference_date: date | None = None
     signals: list[HistoricalSignalOut]
+    scorecard: ScorecardOut
     warnings: list[str]
 
 

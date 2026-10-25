@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
+from statistics import fmean
 
 from sqlalchemy.orm import Session
 
@@ -27,13 +28,23 @@ from .model_registry import (
 from .signals import classify_return, is_out_of_distribution, out_of_distribution_z
 from .storage import (
     active_model_version,
+    close_on_or_after,
+    first_price_date_on_or_after,
     nth_price_date,
     price_date_range,
+    price_frame_between,
     price_frame_until,
 )
 from .trading_calendar import crosses_unknown_year, load_holidays, target_date
 
 MAX_REFERENCE_AGE_YEARS = 10
+OUTCOME_LOOKUP_DAYS = 7
+MONTHS_ID = ("Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des")
+
+
+def format_date_id(day: date) -> str:
+    """A date as the interface writes it, so errors do not leak ISO strings."""
+    return f"{day.day} {MONTHS_ID[day.month - 1]} {day.year}"
 
 
 class HistoricalDateError(ValueError):
@@ -56,6 +67,25 @@ class HorizonSignal:
     warnings: str | None
     model_artifact: str | None
     model_version_id: int | None
+    actual_close: float | None = None
+    actual_date: date | None = None
+    actual_return_pct: float | None = None
+    actual_signal: str | None = None
+    prediction_error_pct: float | None = None
+    direction_correct: bool | None = None
+    outcome_status: str = "pending"
+    outcome_approximate: bool = False
+
+
+@dataclass(frozen=True)
+class Scorecard:
+    realized: int
+    pending: int
+    no_price: int
+    corporate_action: int
+    direction_correct: int
+    direction_total: int
+    mean_abs_error_pct: float | None
 
 
 @dataclass(frozen=True)
@@ -66,6 +96,8 @@ class HistoricalSignals:
     first_price_date: date
     last_price_date: date
     earliest_reference_date: date
+    first_usable_reference_date: date | None
+    scorecard: Scorecard
     signals: list[HorizonSignal] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -83,6 +115,29 @@ def reference_bounds(first_price_date: date, last_price_date: date) -> tuple[dat
         first_price_date, _years_before(last_price_date, MAX_REFERENCE_AGE_YEARS)
     )
     return oldest, last_price_date
+
+
+def first_usable_reference_date(
+    session: Session, symbol: str, bounds: tuple[date, date] | None = None
+) -> date | None:
+    """The first stored session that can fill the longest model window.
+
+    `earliest_reference_date` answers how far back the data goes. This is the
+    stricter date the picker can actually offer: a session, and one with enough
+    closes behind it for every horizon.
+    """
+    if bounds is None:
+        first_price_date, last_price_date = price_date_range(session, symbol)
+    else:
+        first_price_date, last_price_date = bounds
+    if first_price_date is None or last_price_date is None:
+        return None
+
+    earliest, _ = reference_bounds(first_price_date, last_price_date)
+    window_start = nth_price_date(session, symbol, max(config.HORIZONS))
+    if window_start is None:
+        return None
+    return first_price_date_on_or_after(session, symbol, max(earliest, window_start))
 
 
 def _calendar_note(known_years: frozenset[int]) -> str:
@@ -127,36 +182,53 @@ def signals_for_date(
         )
 
     earliest, latest = reference_bounds(first_price_date, last_price_date)
+    usable = first_usable_reference_date(
+        session, symbol, (first_price_date, last_price_date)
+    )
+    lower = usable or earliest
     if reference_date > latest:
         raise HistoricalDateError(
-            f"Tanggal {reference_date} melewati harga terbaru {latest}. "
-            f"Pilih tanggal antara {earliest} dan {latest}."
+            f"Tanggal {format_date_id(reference_date)} melewati harga terbaru "
+            f"{format_date_id(latest)}. Pilih tanggal antara {format_date_id(lower)} "
+            f"dan {format_date_id(latest)}."
         )
     if reference_date < earliest:
         raise HistoricalDateError(
-            f"Tanggal {reference_date} di luar rentang data. "
-            f"Pilih tanggal antara {earliest} dan {latest}."
+            f"Tanggal {format_date_id(reference_date)} di luar rentang data. "
+            f"Pilih tanggal antara {format_date_id(lower)} dan {format_date_id(latest)}."
         )
 
     needed = max(horizon_list)
     frame = price_frame_until(session, symbol, reference_date, limit=needed)
     if frame.empty or frame.iloc[-1]["date"] != reference_date:
         previous = None if frame.empty else frame.iloc[-1]["date"]
-        hint = f" Sesi terakhir sebelumnya adalah {previous}." if previous else ""
+        hint = (
+            f" Sesi terakhir sebelumnya adalah {format_date_id(previous)}."
+            if previous
+            else ""
+        )
         raise HistoricalDateError(
-            f"Tidak ada harga penutupan pada {reference_date}.{hint} "
+            f"Tidak ada harga penutupan pada {format_date_id(reference_date)}.{hint} "
             "Pilih tanggal sesi bursa yang punya harga."
         )
     if len(frame) < needed:
         first_fit = nth_price_date(session, symbol, needed)
-        hint = f" Tanggal acuan paling awal yang cukup adalah {first_fit}." if first_fit else ""
+        hint = (
+            f" Tanggal acuan paling awal yang cukup adalah {format_date_id(first_fit)}."
+            if first_fit
+            else ""
+        )
         raise HistoricalDateError(
-            f"Sampai {reference_date} hanya ada {len(frame)} sesi harga, "
+            f"Sampai {format_date_id(reference_date)} hanya ada {len(frame)} sesi harga, "
             f"model butuh {needed} sesi masukan.{hint}"
         )
 
     holidays, known_years = load_holidays(session)
     reference_close = float(frame.iloc[-1]["close"])
+    projected_dates = {
+        horizon: target_date(reference_date, horizon, holidays)
+        for horizon in horizon_list
+    }
     rows: list[HorizonSignal] = []
     warnings: list[str] = []
 
@@ -177,11 +249,49 @@ def signals_for_date(
             continue
 
         artifact_path, scalers, version_id = _model_for(session, symbol, horizon)
-        predicted = predict_price(artifact_path, horizon, frame["close"], scalers)
+        predicted = float(
+            predict_price(artifact_path, horizon, frame["close"], scalers)
+        )
         signal, change_pct = classify_return(predicted, reference_close, horizon)
         z = out_of_distribution_z(reference_close, scalers.input_mean, scalers.input_scale)
         ood = is_out_of_distribution(z)
-        projected = target_date(reference_date, horizon, holidays)
+        projected = projected_dates[horizon]
+
+        actual_close: float | None = None
+        actual_date: date | None = None
+        actual_return_pct: float | None = None
+        actual_signal: str | None = None
+        prediction_error_pct: float | None = None
+        direction_correct: bool | None = None
+        outcome_status = "pending"
+        outcome_approximate = False
+
+        if projected <= last_price_date:
+            outcome = close_on_or_after(
+                session, symbol, projected, OUTCOME_LOOKUP_DAYS
+            )
+            if outcome is None:
+                outcome_status = "no_price"
+            else:
+                actual_date, actual_close = outcome
+                outcome_approximate = actual_date != projected
+                outcome_frame = price_frame_between(
+                    session, symbol, reference_date, actual_date
+                )
+                if len(outcome_frame) >= 2 and window_has_corporate_action(
+                    outcome_frame, len(outcome_frame)
+                ):
+                    outcome_status = "corporate_action"
+                else:
+                    outcome_status = "realized"
+                actual_signal, actual_return = classify_return(
+                    actual_close, reference_close, horizon
+                )
+                actual_return_pct = float(actual_return)
+                if predicted:
+                    prediction_error_pct = (actual_close - predicted) / predicted * 100.0
+                if outcome_status == "realized":
+                    direction_correct = actual_signal == signal
 
         row_warnings: list[str] = []
         if ood:
@@ -197,7 +307,7 @@ def signals_for_date(
                 data_as_of=reference_date,
                 target_date=projected,
                 reference_close=reference_close,
-                predicted_price=float(predicted),
+                predicted_price=predicted,
                 return_pct=float(change_pct),
                 threshold_pct=config.RETURN_THRESHOLDS[horizon] * 100.0,
                 signal=signal,
@@ -206,13 +316,41 @@ def signals_for_date(
                 warnings="; ".join(row_warnings) or None,
                 model_artifact=artifact_filename(artifact_path),
                 model_version_id=version_id,
+                actual_close=actual_close,
+                actual_date=actual_date,
+                actual_return_pct=actual_return_pct,
+                actual_signal=actual_signal,
+                prediction_error_pct=prediction_error_pct,
+                direction_correct=direction_correct,
+                outcome_status=outcome_status,
+                outcome_approximate=outcome_approximate,
             )
         )
 
     if not rows:
         raise HistoricalDateError(
-            f"Tidak ada horizon yang bisa dihitung pada {reference_date}."
+            f"Tidak ada horizon yang bisa dihitung pada {format_date_id(reference_date)}."
         )
+
+    realized_rows = [row for row in rows if row.outcome_status == "realized"]
+    errors = [
+        abs(row.prediction_error_pct)
+        for row in realized_rows
+        if row.prediction_error_pct is not None
+    ]
+    scorecard = Scorecard(
+        realized=len(realized_rows),
+        pending=sum(1 for row in rows if row.outcome_status == "pending"),
+        no_price=sum(1 for row in rows if row.outcome_status == "no_price"),
+        corporate_action=sum(
+            1 for row in rows if row.outcome_status == "corporate_action"
+        ),
+        direction_correct=sum(
+            1 for row in realized_rows if row.direction_correct is True
+        ),
+        direction_total=len(realized_rows),
+        mean_abs_error_pct=fmean(errors) if errors else None,
+    )
 
     return HistoricalSignals(
         symbol=symbol,
@@ -221,6 +359,8 @@ def signals_for_date(
         first_price_date=first_price_date,
         last_price_date=last_price_date,
         earliest_reference_date=earliest,
+        first_usable_reference_date=usable,
+        scorecard=scorecard,
         signals=rows,
         warnings=warnings,
     )

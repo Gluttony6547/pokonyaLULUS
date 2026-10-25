@@ -21,7 +21,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import __version__, config, db, training
-from .historical import HistoricalDateError, reference_bounds, signals_for_date
+from .historical import (
+    HistoricalDateError,
+    first_usable_reference_date as usable_reference_date,
+    reference_bounds,
+    signals_for_date,
+)
 from .indicators import compute_indicators
 from .market_data import MarketDataUnavailable, fetch_intraday_quote
 from .model_registry import ModelUnavailable, artifact_filename, artifact_inventory
@@ -36,6 +41,7 @@ from .schemas import (
     ModelVersionOut,
     PriceResponse,
     PriceRow,
+    ScorecardOut,
     SignalOut,
     SignalsResponse,
     StockOut,
@@ -144,6 +150,11 @@ def list_stocks(session: Session = Depends(get_session)) -> list[StockOut]:
             select(DailyPrice.symbol, func.min(DailyPrice.trade_date)).group_by(DailyPrice.symbol)
         ).all()
     )
+    counts = dict(
+        session.execute(
+            select(DailyPrice.symbol, func.count()).group_by(DailyPrice.symbol)
+        ).all()
+    )
     rows: list[StockOut] = []
     for stock in session.scalars(select(Stock).order_by(Stock.symbol)):
         last_date, last_close = latest.get(stock.symbol, (None, None))
@@ -162,6 +173,14 @@ def list_stocks(session: Session = Depends(get_session)) -> list[StockOut]:
                     if first_date is not None and last_date is not None
                     else None
                 ),
+                first_usable_reference_date=(
+                    usable_reference_date(
+                        session, stock.symbol, (first_date, last_date)
+                    )
+                    if first_date is not None and last_date is not None
+                    else None
+                ),
+                price_session_count=counts.get(stock.symbol, 0),
             )
         )
     return rows
@@ -281,7 +300,17 @@ def historical_signals(
         first_price_date=result.first_price_date,
         last_price_date=result.last_price_date,
         earliest_reference_date=result.earliest_reference_date,
+        first_usable_reference_date=result.first_usable_reference_date,
         signals=[HistoricalSignalOut.model_validate(row) for row in result.signals],
+        scorecard=ScorecardOut(
+            realized=result.scorecard.realized,
+            pending=result.scorecard.pending,
+            no_price=result.scorecard.no_price,
+            corporate_action=result.scorecard.corporate_action,
+            direction_correct=result.scorecard.direction_correct,
+            direction_total=result.scorecard.direction_total,
+            mean_abs_error_pct=result.scorecard.mean_abs_error_pct,
+        ),
         warnings=result.warnings,
     )
 

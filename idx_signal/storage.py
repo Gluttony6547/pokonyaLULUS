@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
 from sqlalchemy import func, select
@@ -223,6 +223,33 @@ def nth_price_date(session: Session, symbol: str, sessions: int) -> date | None:
     )
 
 
+def first_price_date_on_or_after(session: Session, symbol: str, start: date) -> date | None:
+    """The first stored session at or after `start`."""
+    return session.scalar(
+        select(DailyPrice.trade_date)
+        .where(DailyPrice.symbol == symbol, DailyPrice.trade_date >= start)
+        .order_by(DailyPrice.trade_date)
+        .limit(1)
+    )
+
+
+def close_on_or_after(
+    session: Session, symbol: str, start: date, days: int = 7
+) -> tuple[date, float] | None:
+    """The first close in the `days` after `start`, used to score a target date."""
+    row = session.execute(
+        select(DailyPrice.trade_date, DailyPrice.close)
+        .where(
+            DailyPrice.symbol == symbol,
+            DailyPrice.trade_date >= start,
+            DailyPrice.trade_date <= start + timedelta(days=days),
+        )
+        .order_by(DailyPrice.trade_date)
+        .limit(1)
+    ).first()
+    return (row.trade_date, float(row.close)) if row else None
+
+
 def _price_frame(rows) -> pd.DataFrame:
     if not rows:
         return pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume"])
@@ -255,6 +282,23 @@ def price_frame_until(
         .where(DailyPrice.symbol == symbol, DailyPrice.trade_date <= end_date)
         .order_by(DailyPrice.trade_date.desc())
         .limit(limit)
+    ).all()
+    return _price_frame(rows)
+
+
+def price_frame_between(
+    session: Session, symbol: str, start: date, end: date
+) -> pd.DataFrame:
+    """The stored bars from `start` to `end`, oldest first."""
+    rows = session.execute(
+        select(DailyPrice.trade_date, DailyPrice.open, DailyPrice.high, DailyPrice.low,
+               DailyPrice.close, DailyPrice.volume)
+        .where(
+            DailyPrice.symbol == symbol,
+            DailyPrice.trade_date >= start,
+            DailyPrice.trade_date <= end,
+        )
+        .order_by(DailyPrice.trade_date)
     ).all()
     return _price_frame(rows)
 

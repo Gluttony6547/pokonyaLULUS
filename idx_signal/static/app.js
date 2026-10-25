@@ -3,6 +3,7 @@
 const API = "/api/v1";
 const WIB = "Asia/Jakarta";
 const HORIZONS = [1, 5, 10, 20, 50];
+const WINDOW = Math.max(...HORIZONS);
 
 const state = {
   symbols: [],
@@ -16,6 +17,7 @@ const state = {
   referenceClose: null,
   referenceCloseDate: null,
   referenceDate: null,
+  rejectedReference: false,
   signalRequest: 0,
 };
 
@@ -44,6 +46,11 @@ function formatPercent(value) {
   if (value === null || value === undefined) return "belum tersedia";
   const sign = value > 0 ? "+" : value < 0 ? "\u2212" : "";
   return `${sign}${Math.abs(value).toFixed(2).replace(".", ",")}%`;
+}
+
+function formatAbsPercent(value) {
+  if (value === null || value === undefined) return "belum tersedia";
+  return `${Math.abs(value).toFixed(2).replace(".", ",")}%`;
 }
 
 function formatDate(value) {
@@ -140,13 +147,31 @@ async function api(path, options) {
     ...options,
   });
   const text = await response.text();
-  const payload = text ? JSON.parse(text) : null;
+  let payload = null;
+  let parsed = true;
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      parsed = false;
+    }
+  }
   if (!response.ok) {
-    const detail = payload && payload.detail ? payload.detail : `Permintaan gagal (${response.status}).`;
-    const error = new Error(typeof detail === "string" ? detail : `Permintaan gagal (${response.status}).`);
+    const detail = payload && payload.detail;
+    const detailText =
+      typeof detail === "string"
+        ? detail
+        : detail && typeof detail.message === "string"
+          ? detail.message
+          : "";
+    const fallback = parsed
+      ? `Permintaan gagal (${response.status}).`
+      : `Server mengembalikan respons yang tidak bisa dibaca (HTTP ${response.status}).`;
+    const error = new Error(detailText || fallback);
     error.status = response.status;
     throw error;
   }
+  if (!parsed) throw new Error("Respons server tidak bisa dibaca.");
   return payload;
 }
 
@@ -230,6 +255,7 @@ function selectSymbol(symbol) {
   state.symbol = symbol;
   state.quote = null;
   state.quoteLoading = false;
+  state.rejectedReference = false;
   state.referenceClose = null;
   state.referenceCloseDate = null;
   state.referenceDate = null;
@@ -243,6 +269,7 @@ function selectSymbol(symbol) {
     ? `${stock.name}${stock.sector ? ` · ${formatSector(stock.sector)}` : ""}`
     : "";
   loadSymbolPanels();
+  writeUrlState();
 }
 
 /* Reference date */
@@ -251,18 +278,29 @@ function currentStock() {
   return state.symbols.find((item) => item.symbol === state.symbol) || null;
 }
 
+function referenceBounds(stock = currentStock()) {
+  return {
+    min: stock?.first_usable_reference_date || "",
+    max: stock?.last_price_date || "",
+    sessions: stock?.price_session_count || 0,
+  };
+}
+
 function applyDateBounds() {
   const stock = currentStock();
   if (!stock) return;
   const input = $("reference-date");
-  const min = stock.earliest_reference_date || "";
-  const max = stock.last_price_date || "";
+  const { min, max, sessions } = referenceBounds(stock);
   input.min = min;
   input.max = max;
-  input.disabled = !max;
-  $("date-hint").textContent = max
-    ? `Sinyal dihitung ulang dari harga penutupan sampai tanggal ini. Data ${stock.symbol} tersedia ${formatDate(min)} sampai ${formatDate(max)}; kosongkan untuk sinyal terbaru.`
-    : `Belum ada harga tersimpan untuk ${stock.symbol}. Perbarui harga untuk mengisi rentang tanggal.`;
+  input.disabled = !min || !max;
+  if (!max) {
+    $("date-hint").textContent = `Belum ada harga tersimpan untuk ${stock.symbol}. Perbarui harga untuk mengisi rentang tanggal.`;
+  } else if (!min) {
+    $("date-hint").textContent = `${stock.symbol} baru punya ${sessions} sesi harga. Model membutuhkan ${WINDOW} sesi. Perbarui harga untuk mengisi rentang tanggal.`;
+  } else {
+    $("date-hint").textContent = `Model memakai ${WINDOW} sesi terakhir. Tanggal paling awal yang bisa dihitung: ${formatDate(min)}. Data tersedia sampai ${formatDate(max)}.`;
+  }
 }
 
 function setDateMessage(message) {
@@ -280,32 +318,129 @@ function clearReferencePrice() {
   renderReferencePrice();
 }
 
+function clearSignalView() {
+  $("signal-body").hidden = true;
+  hideState("signal-state");
+  clearReferencePrice();
+  renderActiveDate("tidak tersedia");
+}
+
+function isIsoDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return (
+    date.getUTCFullYear() === year &&
+    date.getUTCMonth() === month - 1 &&
+    date.getUTCDate() === day
+  );
+}
+
+function referenceDateProblem(value) {
+  if (!value) return null;
+  const { min, max } = referenceBounds();
+  if (!isIsoDate(value)) return "Tanggal acuan harus berformat YYYY-MM-DD.";
+  if (!min || !max) {
+    return `Tanggal acuan belum tersedia untuk ${currentStock()?.symbol || "saham ini"}.`;
+  }
+  if (value < min || value > max) {
+    return `Tanggal ${formatDate(value)} di luar rentang data ${formatDate(min)} sampai ${formatDate(max)}.`;
+  }
+  return null;
+}
+
+function rejectReferenceDate(message) {
+  // Bump the token so an in-flight response cannot overwrite this message.
+  state.signalRequest += 1;
+  state.rejectedReference = true;
+  state.referenceDate = null;
+  setDateMessage(message);
+  clearSignalView();
+  $("signals-heading").textContent = "Sinyal terbaru";
+  $("latest-signals").hidden = false;
+  writeUrlState();
+}
+
 async function applyReferenceDate(value) {
-  const stock = currentStock();
-  const min = stock?.earliest_reference_date || "";
-  const max = stock?.last_price_date || "";
-  if (value && (value < min || value > max)) {
-    setDateMessage(
-      `Tanggal ${formatDate(value)} di luar rentang data ${formatDate(min)} sampai ${formatDate(max)}.`,
-    );
-    $("signal-body").hidden = true;
-    hideState("signal-state");
-    $("latest-signals").hidden = false;
-    clearReferencePrice();
-    renderActiveDate("tidak tersedia");
+  const problem = referenceDateProblem(value);
+  if (problem) {
+    rejectReferenceDate(problem);
     return;
   }
   setDateMessage("");
+  state.rejectedReference = false;
   state.referenceDate = value || null;
   $("latest-signals").hidden = !state.referenceDate;
+  writeUrlState();
   await loadSignals();
 }
 
 /* Signal panel */
 
+function outcomeLabel(signal) {
+  if (signal.outcome_status === "realized") {
+    return signal.direction_correct ? "tepat" : "meleset";
+  }
+  if (signal.outcome_status === "pending") return "belum terjadi";
+  if (signal.outcome_status === "no_price") return "tidak ada harga";
+  if (signal.outcome_status === "corporate_action") return "aksi korporasi";
+  return "belum dinilai";
+}
+
+function renderActual(signal) {
+  if (signal.actual_close === null || signal.actual_close === undefined) {
+    if (signal.outcome_status === "pending") {
+      return `Belum terjadi. Target ${formatDate(signal.target_date)}.`;
+    }
+    if (signal.outcome_status === "no_price") return "Harga target belum tersedia.";
+    if (signal.outcome_status === "corporate_action") {
+      return "Aksi korporasi di jendela target. Hasil tidak dinilai.";
+    }
+    return "belum tersedia";
+  }
+  if (signal.outcome_status === "corporate_action") {
+    return `${formatPrice(signal.actual_close)} · ${formatDate(signal.actual_date)} ` +
+      `<span class="artifact">aksi korporasi</span>`;
+  }
+  if (signal.outcome_approximate) {
+    return `${formatPrice(signal.actual_close)} · Sesi terdekat: ${formatDate(signal.actual_date)}`;
+  }
+  return `${formatPrice(signal.actual_close)} · ${formatDate(signal.actual_date)}`;
+}
+
+function renderOutcome(signal) {
+  const label = outcomeLabel(signal);
+  return `<span class="outcome" data-correct="${
+    signal.direction_correct === true
+  }">${escapeHtml(label)}</span>`;
+}
+
+function renderScorecard(payload, historical) {
+  const node = $("scorecard-summary");
+  if (!node) return;
+  const score = payload.scorecard;
+  if (!historical || !score || !score.realized) {
+    node.hidden = true;
+    node.textContent = "";
+    return;
+  }
+  const parts = [
+    `${score.realized} dari ${payload.signals.length} horizon sudah terealisasi.`,
+  ];
+  if (score.direction_total > 0) {
+    parts.push(`Arah tepat ${score.direction_correct} dari ${score.direction_total}.`);
+  }
+  if (score.mean_abs_error_pct !== null && score.mean_abs_error_pct !== undefined) {
+    parts.push(`Rata-rata selisih absolut ${formatAbsPercent(score.mean_abs_error_pct)}.`);
+  }
+  node.textContent = parts.join(" ");
+  node.hidden = false;
+}
+
 function renderSignals(payload) {
   const historical = Boolean(state.referenceDate);
   const stock = currentStock();
+  $("signals").dataset.mode = historical ? "historical" : "latest";
   $("signals-heading").textContent = historical ? "Sinyal historis" : "Sinyal terbaru";
   $("signals-sub").textContent = stock
     ? `${stock.name}${stock.sector ? ` · ${formatSector(stock.sector)}` : ""}`
@@ -314,6 +449,12 @@ function renderSignals(payload) {
   state.referenceCloseDate = historical ? payload.reference_date : payload.last_price_date;
   renderReferencePrice();
   renderActiveDate(formatDate(historical ? payload.reference_date : payload.last_price_date));
+  renderScorecard(payload, historical);
+  const historicalNote = $("historical-note");
+  historicalNote.textContent = historical
+    ? "Dihitung ulang dengan model yang aktif sekarang, bukan sinyal yang tersimpan pada tanggal itu."
+    : "";
+  historicalNote.hidden = !historical;
 
   const warnings = payload.warnings || [];
   $("signal-warnings").innerHTML = warnings
@@ -342,6 +483,7 @@ function renderSignals(payload) {
   rows.innerHTML = "";
   payload.signals.forEach((signal) => {
     const ratio = Number(signal.return_pct);
+    const error = signal.prediction_error_pct;
     const row = document.createElement("tr");
     row.innerHTML = `
       <td data-label="Rentang waktu"><span class="horizon">${horizonLabel(signal.horizon_days)}</span>
@@ -350,6 +492,11 @@ function renderSignals(payload) {
       <td data-label="Harga perkiraan">${formatPrice(signal.predicted_price)}</td>
       <td data-label="Perubahan"><span class="${deltaClass(ratio)}">${formatPercent(ratio)}</span>
         <span class="artifact">ambang ${formatPercent(signal.threshold_pct)}</span></td>
+      <td class="outcome-col" data-label="Aktual">${renderActual(signal)}</td>
+      <td class="outcome-col" data-label="Selisih">${
+        error === null || error === undefined ? "belum tersedia" : formatPercent(error)
+      }</td>
+      <td class="outcome-col" data-label="Arah">${renderOutcome(signal)}</td>
       <td data-label="Perkiraan tanggal">${formatDate(signal.target_date)}</td>
       <td data-label="Model"><span class="artifact">${escapeHtml(signal.model_artifact || "belum terdaftar")}</span></td>
     `;
@@ -361,7 +508,7 @@ function renderSignals(payload) {
       const noteRow = document.createElement("tr");
       noteRow.className = "note-row";
       const cell = document.createElement("td");
-      cell.colSpan = 6;
+      cell.colSpan = historical ? 9 : 6;
       cell.textContent = signal.warnings;
       noteRow.appendChild(cell);
       rows.appendChild(noteRow);
@@ -373,8 +520,8 @@ function renderSignals(payload) {
     payload.signals[0].data_as_of,
   );
   $("signal-note").textContent = historical
-    ? `Dihitung ulang dari harga penutupan ${formatDate(newest)} memakai model yang tersimpan. ` +
-      "Tanggal target mengikuti sesi bursa IDX; hasil ini tidak disimpan sebagai sinyal operasional."
+    ? `Harga acuan ${formatDate(newest)}. Tanggal target mengikuti sesi bursa IDX; ` +
+      "hasil ini tidak disimpan sebagai sinyal operasional."
     : `Sinyal memakai harga penutupan ${formatDate(newest)}; harga intrahari hanya untuk pantauan. ` +
       "Tanggal perkiraan dihitung dari hari ini. " +
       `${payload.signals.length} dari ${HORIZONS.length} rentang waktu memiliki sinyal.`;
@@ -406,14 +553,11 @@ async function loadSignals() {
     renderSignals(payload);
   } catch (error) {
     if (request !== state.signalRequest) return;
-    $("signal-body").hidden = true;
-    clearReferencePrice();
-    renderActiveDate("tidak tersedia");
     if (historical && error.status === 422) {
-      hideState("signal-state");
-      setDateMessage(error.message);
+      rejectReferenceDate(error.message);
       return;
     }
+    clearSignalView();
     setState(
       "signal-state",
       "error",
@@ -425,10 +569,14 @@ async function loadSignals() {
 }
 
 function renderReferencePrice() {
+  if (state.rejectedReference) {
+    $("reference-price").textContent = "Harga acuan belum tersedia";
+    return;
+  }
   if (state.referenceDate) {
     $("reference-price").textContent =
       state.referenceClose === null
-        ? ""
+        ? "Harga acuan belum tersedia"
         : `Harga acuan ${formatPrice(state.referenceClose)} · ${formatDate(state.referenceCloseDate)}`;
     return;
   }
@@ -570,11 +718,14 @@ function renderIndicators(payload) {
 
 async function loadPrices() {
   if (!state.symbol) return;
+  const symbol = state.symbol;
   try {
-    const payload = await api(`/prices/${state.symbol}?limit=180`);
+    const payload = await api(`/prices/${symbol}?limit=180`);
+    if (state.symbol !== symbol) return;
     renderChart(payload);
     renderIndicators(payload);
   } catch (error) {
+    if (state.symbol !== symbol) return;
     $("chart-caption").textContent = `Data harga tidak bisa dimuat: ${error.message}`;
     $("chart-facts").innerHTML = "";
     $("indicator-facts").innerHTML = "";
@@ -616,13 +767,17 @@ function renderHistory(rows) {
 
 async function loadHistory() {
   if (!state.symbol) return;
+  const symbol = state.symbol;
+  const horizon = state.historyHorizon;
   setState("history-state", "", "Memuat riwayat…", "");
   try {
     const rows = await api(
-      `/predictions/${state.symbol}?horizon_days=${encodeURIComponent(state.historyHorizon)}&limit=24`,
+      `/predictions/${symbol}?horizon_days=${encodeURIComponent(horizon)}&limit=24`,
     );
+    if (state.symbol !== symbol || state.historyHorizon !== horizon) return;
     renderHistory(rows);
   } catch (error) {
+    if (state.symbol !== symbol || state.historyHorizon !== horizon) return;
     $("history-wrap").hidden = true;
     setState("history-state", "error", "Riwayat tidak bisa dimuat.", error.message, {
       label: "Coba lagi",
@@ -726,11 +881,14 @@ function renderVersions(rows) {
 
 async function loadVersions() {
   if (!state.symbol) return;
+  const symbol = state.symbol;
   setState("models-state", "", "Memuat versi model.", "");
   try {
-    const rows = await api(`/model-versions/${state.symbol}`);
+    const rows = await api(`/model-versions/${symbol}`);
+    if (state.symbol !== symbol) return;
     renderVersions(rows);
   } catch (error) {
+    if (state.symbol !== symbol) return;
     $("versions-wrap").hidden = true;
     setState("models-state", "error", "Versi model tidak bisa dimuat.", error.message, {
       label: "Coba lagi",
@@ -904,7 +1062,29 @@ async function loadStocks() {
   applyDateBounds();
 }
 
-async function boot() {
+function readUrlState() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    symbol: (params.get("symbol") || "").trim().toUpperCase(),
+    date: (params.get("date") || "").trim(),
+    horizon: (params.get("horizon") || "").trim(),
+  };
+}
+
+function writeUrlState() {
+  if (!state.symbol) return;
+  const params = new URLSearchParams();
+  params.set("symbol", state.symbol);
+  if (state.referenceDate) params.set("date", state.referenceDate);
+  params.set("horizon", state.historyHorizon);
+  window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
+}
+
+let controlsBound = false;
+
+function initControls() {
+  if (controlsBound) return;
+  controlsBound = true;
   initTheme();
   HORIZONS.forEach((days) => {
     [ $("history-horizon"), $("train-horizon") ].forEach((select) => {
@@ -916,6 +1096,7 @@ async function boot() {
   });
   $("history-horizon").addEventListener("change", (event) => {
     state.historyHorizon = event.target.value;
+    writeUrlState();
     loadHistory();
   });
   $("train-form").addEventListener("submit", submitTraining);
@@ -927,6 +1108,10 @@ async function boot() {
     $("reference-date").value = "";
     applyReferenceDate(null);
   });
+}
+
+async function boot() {
+  initControls();
 
   setState("signal-state", "", "Memuat daftar saham…", "Menyiapkan pilihan saham.");
   try {
@@ -947,7 +1132,27 @@ async function boot() {
     );
     return;
   }
-  selectSymbol(state.symbols[0].symbol);
+
+  const url = readUrlState();
+  const known = state.symbols.some((item) => item.symbol === url.symbol);
+  if (HORIZONS.map(String).includes(url.horizon)) {
+    state.historyHorizon = url.horizon;
+    $("history-horizon").value = url.horizon;
+  }
+  selectSymbol(known ? url.symbol : state.symbols[0].symbol);
+  if (known && url.date) {
+    const problem = referenceDateProblem(url.date);
+    if (problem) {
+      setDateMessage("Tanggal di tautan tidak bisa dipakai. Menampilkan sinyal terbaru.");
+      $("reference-date").value = "";
+      writeUrlState();
+    } else {
+      $("reference-date").value = url.date;
+      await applyReferenceDate(url.date);
+    }
+  } else {
+    writeUrlState();
+  }
   await Promise.all([loadHealth(), loadUpdates(), loadJobs()]);
   if (state.quoteTimer) window.clearInterval(state.quoteTimer);
   state.quoteTimer = window.setInterval(() => {
