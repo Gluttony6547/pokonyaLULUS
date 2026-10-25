@@ -117,6 +117,23 @@ def reference_bounds(first_price_date: date, last_price_date: date) -> tuple[dat
     return oldest, last_price_date
 
 
+def first_usable_reference_date_from_window(
+    session: Session,
+    symbol: str,
+    bounds: tuple[date, date],
+    window_start: date | None,
+) -> date | None:
+    """The first usable session, given the oldest session that fills the window."""
+    first_price_date, last_price_date = bounds
+    if first_price_date is None or last_price_date is None or window_start is None:
+        return None
+    earliest, _ = reference_bounds(first_price_date, last_price_date)
+    floor = max(earliest, window_start)
+    if floor == window_start:
+        return window_start
+    return first_price_date_on_or_after(session, symbol, floor)
+
+
 def first_usable_reference_date(
     session: Session, symbol: str, bounds: tuple[date, date] | None = None
 ) -> date | None:
@@ -133,11 +150,10 @@ def first_usable_reference_date(
     if first_price_date is None or last_price_date is None:
         return None
 
-    earliest, _ = reference_bounds(first_price_date, last_price_date)
     window_start = nth_price_date(session, symbol, max(config.HORIZONS))
-    if window_start is None:
-        return None
-    return first_price_date_on_or_after(session, symbol, max(earliest, window_start))
+    return first_usable_reference_date_from_window(
+        session, symbol, (first_price_date, last_price_date), window_start
+    )
 
 
 def _calendar_note(known_years: frozenset[int]) -> str:

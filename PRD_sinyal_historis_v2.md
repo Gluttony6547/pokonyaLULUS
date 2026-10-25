@@ -402,7 +402,7 @@ Tidak ada feature flag. Endpoint historis adalah satu-satunya konsumen scorecard
 
 ## 17. Lampiran: bukti dan batasan
 
-- Suite Python terakhir: 99 lulus, 541 warning dari Keras dan Starlette, 25,83 detik.
+- Suite Python terakhir: 100 lulus, 541 warning dari Keras dan Starlette, 25,71 detik.
 - Pemeriksaan sintaks `node --check idx_signal/static/app.js` lulus.
 - UI diuji di browser pada server lokal: tanggal valid 3 Mei 2024, tanggal di luar rentang, Sabtu 4 Mei 2024, respons historis tertunda, perpindahan ticker, dan `boot()` ganda.
 - Database lokal hanya berisi harga ADRO dan TLKM. Delapan ticker lain menampilkan state kosong dan pemilih tanggal nonaktif. Ini kondisi data, bukan cacat UI.

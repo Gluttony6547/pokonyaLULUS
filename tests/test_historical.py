@@ -12,6 +12,7 @@ from idx_signal import config, db
 from idx_signal.historical import (
     HistoricalDateError,
     first_usable_reference_date,
+    first_usable_reference_date_from_window,
     format_date_id,
     reference_bounds,
     signals_for_date,
@@ -19,7 +20,7 @@ from idx_signal.historical import (
 from idx_signal.model_registry import scalers_from_research
 from idx_signal.models import Prediction
 from idx_signal.refresh import ensure_model_versions
-from idx_signal.storage import store_prices
+from idx_signal.storage import nth_price_date, store_prices
 from idx_signal.trading_calendar import load_holidays, target_date
 
 
@@ -168,6 +169,20 @@ def test_the_picker_minimum_is_the_first_session_that_fills_the_window(
     result = lookup(usable)
     assert result.first_usable_reference_date == usable
     assert len(result.signals) == len(config.HORIZONS)
+
+
+def test_a_precomputed_window_gives_the_same_picker_minimum(prices, reference_assets):
+    store(prices)
+    with db.session() as session:
+        window_start = nth_price_date(session, "ADRO", max(config.HORIZONS))
+        usable = first_usable_reference_date_from_window(
+            session,
+            "ADRO",
+            (prices.iloc[0]["date"], prices.iloc[-1]["date"]),
+            window_start,
+        )
+
+    assert usable == prices.iloc[max(config.HORIZONS) - 1]["date"]
 
 
 def test_a_realized_target_shows_the_actual_close_and_direction(prices, reference_assets):

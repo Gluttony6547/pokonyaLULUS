@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from . import __version__, config, db, training
 from .historical import (
     HistoricalDateError,
-    first_usable_reference_date as usable_reference_date,
+    first_usable_reference_date_from_window,
     reference_bounds,
     signals_for_date,
 )
@@ -145,20 +145,37 @@ def list_stocks(session: Session = Depends(get_session)) -> list[StockOut]:
         row.symbol: (row.trade_date, row.close)
         for row in session.execute(select(newest).where(newest.c.rank == 1))
     }
-    oldest = dict(
-        session.execute(
-            select(DailyPrice.symbol, func.min(DailyPrice.trade_date)).group_by(DailyPrice.symbol)
-        ).all()
+    totals = {
+        row.symbol: (row.first_date, row.price_rows)
+        for row in session.execute(
+            select(
+                DailyPrice.symbol,
+                func.min(DailyPrice.trade_date).label("first_date"),
+                func.count().label("price_rows"),
+            ).group_by(DailyPrice.symbol)
+        )
+    }
+    ranked_oldest = (
+        select(
+            DailyPrice.symbol,
+            DailyPrice.trade_date,
+            func.row_number()
+            .over(partition_by=DailyPrice.symbol, order_by=DailyPrice.trade_date)
+            .label("rank"),
+        )
+        .subquery()
     )
-    counts = dict(
+    window_start = dict(
         session.execute(
-            select(DailyPrice.symbol, func.count()).group_by(DailyPrice.symbol)
+            select(ranked_oldest.c.symbol, ranked_oldest.c.trade_date).where(
+                ranked_oldest.c.rank == max(config.HORIZONS)
+            )
         ).all()
     )
     rows: list[StockOut] = []
     for stock in session.scalars(select(Stock).order_by(Stock.symbol)):
         last_date, last_close = latest.get(stock.symbol, (None, None))
-        first_date = oldest.get(stock.symbol)
+        first_date, session_count = totals.get(stock.symbol, (None, 0))
         rows.append(
             StockOut(
                 symbol=stock.symbol,
@@ -174,13 +191,16 @@ def list_stocks(session: Session = Depends(get_session)) -> list[StockOut]:
                     else None
                 ),
                 first_usable_reference_date=(
-                    usable_reference_date(
-                        session, stock.symbol, (first_date, last_date)
+                    first_usable_reference_date_from_window(
+                        session,
+                        stock.symbol,
+                        (first_date, last_date),
+                        window_start.get(stock.symbol),
                     )
                     if first_date is not None and last_date is not None
                     else None
                 ),
-                price_session_count=counts.get(stock.symbol, 0),
+                price_session_count=session_count,
             )
         )
     return rows
