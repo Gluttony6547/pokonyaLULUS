@@ -15,9 +15,11 @@ Asia/Jakarta, skipping weekends and recorded IDX holidays.
 
 ## What the dashboard offers
 
-- Latest buy, hold, or sell label per horizon, with the reference close, the
-  model's projected price, the threshold it was compared against, the projected
-  target date, and the model version.
+- Latest buy, hold, or sell label per horizon, with a threshold-based price
+  zone derived from that signal's reference close, the threshold, the target
+  date, and the model version. BUY and SELL show the inclusive outer bounds;
+  HOLD shows the prices between them. These zones explain the signal threshold,
+  not model confidence or a guaranteed price.
 - Intraday quote and timestamp for the selected stock during market hours. The
   quote is for monitoring; model signals continue to use completed daily closes.
 - Out-of-distribution and corporate-action warnings attached to the signal that

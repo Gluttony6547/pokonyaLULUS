@@ -33,9 +33,35 @@ const escapeHtml = (value) =>
   })[char]);
 
 const priceFormat = new Intl.NumberFormat("id-ID", { maximumFractionDigits: 0 });
+const rangePriceFormat = new Intl.NumberFormat("id-ID", {
+  maximumFractionDigits: 2,
+  minimumFractionDigits: 2,
+});
 
 function formatPrice(value) {
   return value === null || value === undefined ? "belum tersedia" : priceFormat.format(value);
+}
+
+function formatRangeBoundary(value) {
+  return rangePriceFormat.format(value);
+}
+
+function formatPriceRange(signal, referencePrice) {
+  if (signal.threshold_pct === null || signal.threshold_pct === undefined || signal.threshold_pct === "") {
+    return "belum tersedia";
+  }
+  const threshold = Number(signal.threshold_pct);
+  if (!Number.isFinite(referencePrice) || referencePrice <= 0 || !Number.isFinite(threshold) || threshold < 0) {
+    return "belum tersedia";
+  }
+  const lower = referencePrice * (1 - threshold / 100);
+  const upper = referencePrice * (1 + threshold / 100);
+  if (signal.signal === "BUY") return `≥ ${formatRangeBoundary(upper)}`;
+  if (signal.signal === "SELL") return `≤ ${formatRangeBoundary(lower)}`;
+  if (signal.signal === "HOLD") {
+    return `> ${formatRangeBoundary(lower)} dan < ${formatRangeBoundary(upper)}`;
+  }
+  return "belum tersedia";
 }
 
 function formatRatio(value) {
@@ -482,22 +508,20 @@ function renderSignals(payload) {
   const rows = $("signal-rows");
   rows.innerHTML = "";
   payload.signals.forEach((signal) => {
-    const ratio = Number(signal.return_pct);
     const error = signal.prediction_error_pct;
     const row = document.createElement("tr");
     row.innerHTML = `
       <td data-label="Rentang waktu"><span class="horizon">${horizonLabel(signal.horizon_days)}</span>
         <span class="artifact">${escapeHtml(formatDate(signal.data_as_of))}</span></td>
       <td data-label="Sinyal"><span class="chip" data-signal="${escapeHtml(signal.signal)}">${escapeHtml(signal.signal)}</span></td>
-      <td data-label="Harga perkiraan">${formatPrice(signal.predicted_price)}</td>
-      <td data-label="Perubahan"><span class="${deltaClass(ratio)}">${formatPercent(ratio)}</span>
-        <span class="artifact">ambang ${formatPercent(signal.threshold_pct)}</span></td>
+      <td data-label="Rentang harga">${formatPriceRange(signal, historical ? signal.reference_close : signal.last_close)}</td>
+      <td data-label="Batas perubahan">±${formatAbsPercent(signal.threshold_pct)}</td>
       <td class="outcome-col" data-label="Aktual">${renderActual(signal)}</td>
       <td class="outcome-col" data-label="Selisih">${
         error === null || error === undefined ? "belum tersedia" : formatPercent(error)
       }</td>
       <td class="outcome-col" data-label="Arah">${renderOutcome(signal)}</td>
-      <td data-label="Perkiraan tanggal">${formatDate(signal.target_date)}</td>
+      <td data-label="Tanggal prediksi">${formatDate(signal.target_date)}</td>
       <td data-label="Model"><span class="artifact">${escapeHtml(signal.model_artifact || "belum terdaftar")}</span></td>
     `;
     rows.appendChild(row);
@@ -523,7 +547,7 @@ function renderSignals(payload) {
     ? `Harga acuan ${formatDate(newest)}. Tanggal target mengikuti sesi bursa IDX; ` +
       "hasil ini tidak disimpan sebagai sinyal operasional."
     : `Sinyal memakai harga penutupan ${formatDate(newest)}; harga intrahari hanya untuk pantauan. ` +
-      "Tanggal perkiraan dihitung dari hari ini. " +
+      "Tanggal prediksi dihitung dari hari ini. " +
       `${payload.signals.length} dari ${HORIZONS.length} rentang waktu memiliki sinyal.`;
   $("signal-body").hidden = false;
 }
@@ -749,15 +773,14 @@ function renderHistory(rows) {
   const body = $("history-rows");
   body.innerHTML = rows
     .map((row) => {
-      const ratio = Number(row.return_pct);
       return `
       <tr>
         <td data-label="Harga per">${formatDate(row.data_as_of)}</td>
         <td data-label="Sinyal"><span class="chip" data-signal="${escapeHtml(row.signal)}">${escapeHtml(row.signal)}</span></td>
         <td data-label="Harga acuan">${formatPrice(row.last_close)}</td>
-        <td data-label="Harga perkiraan">${formatPrice(row.predicted_price)}</td>
-        <td data-label="Perubahan"><span class="${deltaClass(ratio)}">${formatPercent(ratio)}</span></td>
-        <td data-label="Perkiraan tanggal">${formatDate(row.target_date)}</td>
+        <td data-label="Rentang harga">${formatPriceRange(row, row.last_close)}</td>
+        <td data-label="Batas perubahan">±${formatAbsPercent(row.threshold_pct)}</td>
+        <td data-label="Tanggal prediksi">${formatDate(row.target_date)}</td>
         <td data-label="Waktu dibuat">${formatTimestamp(row.created_at)}</td>
       </tr>`;
     })

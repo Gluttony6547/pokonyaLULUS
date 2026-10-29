@@ -22,8 +22,14 @@ jobs:
           pip install -r requirements-torch-cpu.txt
           pip install -r requirements-dev.txt
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Tests
-        run: python -m pytest -q
+        run: |
+          python -m pytest -q
+          node --test tests/test_dashboard.js
 
       - name: Artifact inventory
         run: python -m idx_signal.cli inventory
