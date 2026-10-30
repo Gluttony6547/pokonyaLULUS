@@ -63,7 +63,7 @@ function formatPriceRange(signal, referencePrice) {
   if (signal.signal === "BUY") return `≥ ${formatRangeBoundary(upper)}`;
   if (signal.signal === "SELL") return `≤ ${formatRangeBoundary(lower)}`;
   if (signal.signal === "HOLD") {
-    return `> ${formatRangeBoundary(lower)} dan < ${formatRangeBoundary(upper)}`;
+    return `${formatRangeBoundary(lower)} - ${formatRangeBoundary(upper)}`;
   }
   return "belum tersedia";
 }
@@ -519,7 +519,7 @@ function renderSignals(payload) {
         <span class="artifact">${escapeHtml(formatDate(signal.data_as_of))}</span></td>
       <td data-label="Sinyal"><span class="chip" data-signal="${escapeHtml(signal.signal)}">${escapeHtml(signal.signal)}</span></td>
       <td data-label="Rentang harga">${formatPriceRange(signal, anchorPrice(signal, historical))}</td>
-      <td data-label="Batas perubahan">±${formatAbsPercent(signal.threshold_pct)}</td>
+      <td data-label="Threshold">±${formatAbsPercent(signal.threshold_pct)}</td>
       <td class="outcome-col" data-label="Harga aktual">${renderActual(signal)}</td>
       <td class="outcome-col" data-label="Selisih">${
         error === null || error === undefined ? "belum tersedia" : formatPercent(error)
@@ -783,7 +783,7 @@ function renderHistory(rows) {
         <td data-label="Sinyal"><span class="chip" data-signal="${escapeHtml(row.signal)}">${escapeHtml(row.signal)}</span></td>
         <td data-label="Harga acuan">${formatPrice(row.last_close)}</td>
         <td data-label="Rentang harga">${formatPriceRange(row, anchorPrice(row, false))}</td>
-        <td data-label="Batas perubahan">±${formatAbsPercent(row.threshold_pct)}</td>
+        <td data-label="Threshold">±${formatAbsPercent(row.threshold_pct)}</td>
         <td data-label="Tanggal prediksi">${formatDate(row.target_date)}</td>
         <td data-label="Waktu dibuat">${formatTimestamp(row.created_at)}</td>
       </tr>`;
@@ -1079,7 +1079,12 @@ async function loadSymbolPanels() {
 
 async function loadAll() {
   // A refresh can move the newest price date, which bounds the date control.
-  await loadStocks().catch(() => {});
+  try {
+    await loadStocks();
+  } catch (error) {
+    $("date-hint").textContent =
+      `Rentang tanggal gagal diperbarui (${error.message}). Batas yang tampil masih dari pemuatan sebelumnya.`;
+  }
   await Promise.all([loadHealth(), loadUpdates(), loadJobs(), loadSymbolPanels()]);
 }
 

@@ -146,11 +146,12 @@ test("latest signal rows render BUY, HOLD, and SELL ranges from each row's close
 
   assert.deepEqual(rows.map((row) => row.cells[2].textContent), [
     "≥ 1.020,00",
-    "> 1.940,00 dan < 2.060,00",
+    "1.940,00 - 2.060,00",
     "≤ 480,00",
   ]);
   assert.deepEqual(rows.map((row) => row.cells[3].textContent), ["±2,00%", "±3,00%", "±4,00%"]);
   assert.ok(rows.every((row) => row.cells[2].attributes["data-label"] === "Rentang harga"));
+  assert.ok(rows.every((row) => row.cells[3].attributes["data-label"] === "Threshold"));
   assert.ok(rows.every((row) => row.cells[4].attributes["data-label"] === "Harga aktual"));
   assert.ok(rows.every((row) => !row.cells[2].textContent.includes("9999")));
   assert.equal(elements.get("signals-heading").textContent, "Sinyal terbaru");
@@ -173,7 +174,7 @@ test("historical rows use each signal's reference close rather than latest or po
 
   assert.deepEqual(rows.map((row) => row.cells[2].textContent), [
     "≥ 1.020,00",
-    "> 1.940,00 dan < 2.060,00",
+    "1.940,00 - 2.060,00",
     "≤ 480,00",
   ]);
   assert.equal(context.document.getElementById("signals-heading").textContent, "Sinyal historis");
@@ -192,7 +193,7 @@ test("saved history rows calculate independent ranges from each stored close and
   const rows = elements.get("history-rows").rows;
   assert.deepEqual(rows.map((row) => row.cells[3].textContent), [
     "≥ 1.020,00",
-    "> 1.940,00 dan < 2.060,00",
+    "1.940,00 - 2.060,00",
     "≤ 480,00",
   ]);
   assert.deepEqual(rows.map((row) => row.cells[4].textContent), ["±2,00%", "±3,00%", "±4,00%"]);
@@ -209,7 +210,8 @@ test("visible table labels and the range disclaimer match the approved wording",
   assert.ok(historyTable);
   for (const table of [signalTable, historyTable]) {
     assert.match(table, />Rentang harga</);
-    assert.match(table, />Batas perubahan</);
+    assert.match(table, />Threshold</);
+    assert.doesNotMatch(table, />Batas perubahan</);
     assert.match(table, />Tanggal prediksi</);
     assert.doesNotMatch(table, />Harga perkiraan</);
     assert.doesNotMatch(table, />Perkiraan tanggal</);
@@ -217,7 +219,7 @@ test("visible table labels and the range disclaimer match the approved wording",
   assert.match(signalTable, />Harga aktual</);
   assert.doesNotMatch(signalTable, />Aktual</);
   assert.match(historyTable, />Tanggal harga</);
-  assert.match(html, /Rentang harga mengikuti batas perubahan per sinyal, bukan tingkat keyakinan model atau jaminan harga\./);
+  assert.match(html, /Rentang harga mengikuti threshold tiap sinyal, bukan tingkat keyakinan model atau jaminan harga\./);
 });
 
 test("a slower response for the previous reference date cannot replace the current ranges", async () => {
@@ -254,4 +256,21 @@ test("a slower response for the previous reference date cannot replace the curre
   assert.equal(elements.get("date-active").textContent, "Tanggal acuan aktif: 29 Okt 2026");
   assert.equal(elements.get("signal-rows").rows[0].cells[2].textContent, "≥ 2.060,00");
   assert.equal(elements.get("signal-rows").rows.length, 1);
+});
+
+test("a failed stocks reload says the date bounds are still the previous ones", async () => {
+  const { context, elements } = createDashboard();
+  const input = context.document.getElementById("reference-date");
+  input.min = "2026-10-01";
+  input.max = "2026-10-30";
+  context.fetch = () => Promise.reject(new Error("Server menjawab 500."));
+
+  await vm.runInContext("loadAll()", context).catch(() => {});
+
+  assert.match(
+    elements.get("date-hint").textContent,
+    /^Rentang tanggal gagal diperbarui \(Server menjawab 500\.\)\. Batas yang tampil masih dari pemuatan sebelumnya\.$/,
+  );
+  assert.equal(input.min, "2026-10-01");
+  assert.equal(input.max, "2026-10-30");
 });
