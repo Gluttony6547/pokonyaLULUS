@@ -46,6 +46,10 @@ function formatRangeBoundary(value) {
   return rangePriceFormat.format(value);
 }
 
+function anchorPrice(signal, historical) {
+  return historical ? signal.reference_close : signal.last_close;
+}
+
 function formatPriceRange(signal, referencePrice) {
   if (signal.threshold_pct === null || signal.threshold_pct === undefined || signal.threshold_pct === "") {
     return "belum tersedia";
@@ -471,7 +475,7 @@ function renderSignals(payload) {
   $("signals-sub").textContent = stock
     ? `${stock.name}${stock.sector ? ` · ${formatSector(stock.sector)}` : ""}`
     : payload.symbol;
-  state.referenceClose = historical ? payload.reference_close : payload.last_close;
+  state.referenceClose = anchorPrice(payload, historical);
   state.referenceCloseDate = historical ? payload.reference_date : payload.last_price_date;
   renderReferencePrice();
   renderActiveDate(formatDate(historical ? payload.reference_date : payload.last_price_date));
@@ -514,9 +518,9 @@ function renderSignals(payload) {
       <td data-label="Rentang waktu"><span class="horizon">${horizonLabel(signal.horizon_days)}</span>
         <span class="artifact">${escapeHtml(formatDate(signal.data_as_of))}</span></td>
       <td data-label="Sinyal"><span class="chip" data-signal="${escapeHtml(signal.signal)}">${escapeHtml(signal.signal)}</span></td>
-      <td data-label="Rentang harga">${formatPriceRange(signal, historical ? signal.reference_close : signal.last_close)}</td>
+      <td data-label="Rentang harga">${formatPriceRange(signal, anchorPrice(signal, historical))}</td>
       <td data-label="Batas perubahan">±${formatAbsPercent(signal.threshold_pct)}</td>
-      <td class="outcome-col" data-label="Aktual">${renderActual(signal)}</td>
+      <td class="outcome-col" data-label="Harga aktual">${renderActual(signal)}</td>
       <td class="outcome-col" data-label="Selisih">${
         error === null || error === undefined ? "belum tersedia" : formatPercent(error)
       }</td>
@@ -775,10 +779,10 @@ function renderHistory(rows) {
     .map((row) => {
       return `
       <tr>
-        <td data-label="Harga per">${formatDate(row.data_as_of)}</td>
+        <td data-label="Tanggal harga">${formatDate(row.data_as_of)}</td>
         <td data-label="Sinyal"><span class="chip" data-signal="${escapeHtml(row.signal)}">${escapeHtml(row.signal)}</span></td>
         <td data-label="Harga acuan">${formatPrice(row.last_close)}</td>
-        <td data-label="Rentang harga">${formatPriceRange(row, row.last_close)}</td>
+        <td data-label="Rentang harga">${formatPriceRange(row, anchorPrice(row, false))}</td>
         <td data-label="Batas perubahan">±${formatAbsPercent(row.threshold_pct)}</td>
         <td data-label="Tanggal prediksi">${formatDate(row.target_date)}</td>
         <td data-label="Waktu dibuat">${formatTimestamp(row.created_at)}</td>

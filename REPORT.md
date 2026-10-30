@@ -21,6 +21,19 @@ network replaced by fixtures, so nothing in the suite touches Postgres.
 The warnings are from Keras and Starlette internals (numpy 2 `__array__`
 deprecation and a `testclient` import deprecation), not from this code.
 
+Re-run on 30 October 2026, after the range-pricing change in `a07f40d`:
+
+```
+python -m pytest -q
+100 passed, 541 warnings in 29.47s
+node --test tests/test_dashboard.js
+5 pass, 0 fail
+```
+
+The dashboard tests run the real render functions in a `vm` context against a
+small DOM stand-in, so the price ranges, table headers, and the guard against a
+stale response are exercised as behaviour, not matched as source text.
+
 ## 2. Replication against the research output
 
 ```
@@ -239,9 +252,13 @@ the re-organisation added no blob storage.
   this machine. `Dockerfile`, `Dockerfile.vercel`, and the CI job that builds and
   probes the image are written but unexecuted; the CI workflow is the first
   place they will actually run.
-- **Vercel deployment was not performed.** No Vercel CLI or token is available
-  here. The configuration follows the documented container and cron behaviour
-  (verified against Vercel's docs), but the first deploy is the real test.
+- **The deployment is live but its git SHA is not readable from here.**
+  `https://pokonya-lulus.vercel.app` serves `index.html`, `app.css`, and `app.js`
+  byte-identical, ignoring CRLF, to the checked-out commit, checked by comparing
+  the served files with the local copies. No Vercel CLI, token, or deployment
+  tool was available, so the deployed SHA is inferred from that content match
+  rather than quoted from the platform. The crons, the container image, and
+  first-deploy behaviour are otherwise as described in the README.
 - **The Vercel cron path was exercised only locally**, by calling the endpoint
   with the exact `Authorization: Bearer <secret>` header Vercel sends. The
   scheduler itself (that Vercel fires within the hour) is platform behaviour.
