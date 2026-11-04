@@ -465,7 +465,7 @@ CREATE UNIQUE INDEX idx_model_versions_active
     ON model_versions (symbol, horizon_days) WHERE is_active;
 ```
 
-Indeks unik terakhir memastikan hanya satu versi aktif untuk setiap kombinasi saham dan rentang waktu, sehingga pertanyaan "model mana yang dipakai" selalu punya satu jawaban.
+Indeks unik parsial terakhir adalah penguatan yang disarankan, belum dipasang pada basis data yang berjalan. Versi kode saat ini menegakkan aturan satu versi aktif di `training.activate_version`, yang menonaktifkan versi lain untuk kombinasi saham dan rentang waktu yang sama dalam satu transaksi, sehingga pertanyaan "model mana yang dipakai" punya satu jawaban selama aktivasi berjalan lewat layanan. Menambah indeksnya pada basis data berisi data menuntut migrasi tersendiri.
 
 ### 8.4 Hubungan antartabel
 
