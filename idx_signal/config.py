@@ -319,8 +319,15 @@ def cron_secret() -> str | None:
     return env_value("CRON_SECRET")
 
 
-def training_epochs() -> int:
-    return max(1, _env_int("IDX_TRAINING_EPOCHS", 10))
+def admin_username() -> str:
+    return env_value("ADMIN_USERNAME", "admin") or "admin"
+
+
+def admin_password() -> str:
+    return env_value("ADMIN_PASSWORD", "admin") or "admin"
+
+
+ADMIN_TOKEN_HOURS = 12
 
 
 def training_dir() -> Path:

@@ -11,7 +11,8 @@ from idx_signal.refresh import RefreshReport
 
 
 def test_vercel_crons_map_to_the_configured_wib_slots():
-    crons = json.loads(Path("vercel.json").read_text(encoding="utf-8"))["crons"]
+    config_path = Path(__file__).resolve().parents[1] / "vercel.json"
+    crons = json.loads(config_path.read_text(encoding="utf-8"))["crons"]
     expected = (time(16, 5), time(18, 0))
 
     assert len(crons) == len(expected)

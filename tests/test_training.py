@@ -58,7 +58,6 @@ def test_force_queues_even_when_a_model_exists(reference_assets):
 
 
 def test_a_run_registers_an_inactive_candidate(prices, tmp_path, monkeypatch):
-    monkeypatch.setenv("IDX_TRAINING_EPOCHS", "1")
     monkeypatch.setenv("IDX_TRAINING_DIR", str(tmp_path / "trained"))
     config.training_dir.cache_clear() if hasattr(config.training_dir, "cache_clear") else None
 
@@ -78,17 +77,16 @@ def test_a_run_registers_an_inactive_candidate(prices, tmp_path, monkeypatch):
         assert version is not None
         assert version.is_active is False
         assert version.config["source"] == "retrained"
-        assert version.metrics["source"] == "retrained, chronological holdout"
+        assert version.metrics["source"] == "retrained ensemble, chronological holdout"
         assert version.metrics["rows"] > 0
         assert 0.0 <= version.metrics["accuracy"] <= 1.0
         # The candidate stays out of the serving path until it is activated.
         assert active_model_version(session, "ADRO", 1) is None
-        trained_files = list((tmp_path / "trained" / "ADRO").glob("*.keras"))
+        trained_files = list((tmp_path / "trained" / "ADRO").glob("*.joblib"))
     assert len(trained_files) == 1
 
 
 def test_activating_a_candidate_makes_it_the_serving_version(prices, tmp_path, monkeypatch):
-    monkeypatch.setenv("IDX_TRAINING_EPOCHS", "1")
     monkeypatch.setenv("IDX_TRAINING_DIR", str(tmp_path / "trained"))
 
     with db.session() as session:
@@ -105,7 +103,6 @@ def test_activating_a_candidate_makes_it_the_serving_version(prices, tmp_path, m
 
 
 def test_a_failed_run_is_recorded_as_failed(prices, monkeypatch):
-    monkeypatch.setenv("IDX_TRAINING_EPOCHS", "1")
     # No stored prices for this ticker, so training cannot produce samples.
     with db.session() as session:
         job, _ = queue_training_job(session, "TLKM", 5, force=True)

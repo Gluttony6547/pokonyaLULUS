@@ -23,7 +23,15 @@
       <p class="wordmark">Sinyal<abbr title="Bursa Efek Indonesia">IDX</abbr></p>
       <p class="freshness" id="freshness" aria-live="polite">Memeriksa pembaruan terakhir…</p>
       <div class="topbar-actions">
-        <button type="button" class="button" id="refresh-button">Perbarui harga</button>
+        <form class="login-form" id="login-form" hidden>
+          <label class="visually-hidden" for="login-username">Username admin</label>
+          <input type="text" id="login-username" name="username" autocomplete="username" placeholder="Username" required />
+          <label class="visually-hidden" for="login-password">Password admin</label>
+          <input type="password" id="login-password" name="password" autocomplete="current-password" placeholder="Password" required />
+          <button type="submit" class="button" id="login-submit">Masuk admin</button>
+        </form>
+        <button type="button" class="button" id="refresh-button" data-admin-only>Perbarui harga</button>
+        <button type="button" class="button button-quiet" id="logout-button" hidden>Keluar</button>
         <button type="button" class="button button-quiet" id="theme-toggle" aria-pressed="false">
           Mode gelap
         </button>
@@ -186,7 +194,7 @@
           </div>
         </div>
 
-        <form class="train-form" id="train-form">
+        <form class="train-form" id="train-form" data-admin-only>
           <label class="field">
             <span>Rentang waktu</span>
             <select id="train-horizon"></select>

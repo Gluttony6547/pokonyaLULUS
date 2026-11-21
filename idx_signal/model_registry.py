@@ -1,4 +1,4 @@
-"""Registry for the saved LSTM artifacts.
+"""Registry for the saved price-model artifacts (ensemble and legacy LSTM).
 
 The reference notebooks never persisted their StandardScalers, so they are
 rebuilt here from the committed research series using the split the training
@@ -117,8 +117,49 @@ def artifact_sha256(path: str) -> str:
     return digest.hexdigest()
 
 
+ENSEMBLE_SUFFIX = ".joblib"
+ENSEMBLE_TYPE = "ensemble"
+LSTM_TYPE = "lstm"
+
+
+def model_type_of(artifact_path: str) -> str:
+    return ENSEMBLE_TYPE if artifact_path.endswith(ENSEMBLE_SUFFIX) else LSTM_TYPE
+
+
+def build_ensemble():
+    """The ensemble that replaces the LSTM: ridge, gradient boosting and random forest voting."""
+    from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor, VotingRegressor
+    from sklearn.linear_model import Ridge
+
+    return VotingRegressor(
+        [
+            ("ridge", Ridge(alpha=1.0)),
+            ("gradient_boosting", GradientBoostingRegressor(random_state=0)),
+            ("random_forest", RandomForestRegressor(n_estimators=100, random_state=0)),
+        ]
+    )
+
+
+@lru_cache(maxsize=64)
+def load_ensemble(artifact_path: str, horizon_days: int):
+    import joblib
+
+    path = Path(artifact_path)
+    try:
+        model = joblib.load(path)
+    except Exception as error:
+        raise ModelUnavailable(f"berkas {path.name} gagal dimuat: {error}") from error
+    if getattr(model, "n_features_in_", None) != horizon_days:
+        raise ModelUnavailable(
+            f"{path.name} mengharapkan {getattr(model, 'n_features_in_', '?')} masukan, bukan {horizon_days}"
+        )
+    return model
+
+
 @lru_cache(maxsize=64)
 def load_model(artifact_path: str, horizon_days: int):
+    if model_type_of(artifact_path) == ENSEMBLE_TYPE:
+        return load_ensemble(artifact_path, horizon_days)
     path = Path(artifact_path)
     try:
         import keras
@@ -182,9 +223,12 @@ def predict_price(
     # reproduce sklearn's transform exactly.
     scaled = (window - scalers.input_mean) / scalers.input_scale
     model = load_model(artifact_path, horizon_days)
-    predicted_scaled = np.asarray(
-        model.predict(scaled.reshape(1, horizon_days, 1), verbose=0)
-    ).reshape(-1)[0]
+    if model_type_of(artifact_path) == ENSEMBLE_TYPE:
+        predicted_scaled = float(model.predict(scaled.reshape(1, horizon_days))[0])
+    else:
+        predicted_scaled = np.asarray(
+            model.predict(scaled.reshape(1, horizon_days, 1), verbose=0)
+        ).reshape(-1)[0]
     predicted = float(predicted_scaled) * scalers.target_scale + scalers.target_mean
     if not np.isfinite(predicted) or predicted <= 0:
         raise ModelUnavailable("model menghasilkan harga yang tidak bisa dipakai")

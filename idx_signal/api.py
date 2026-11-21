@@ -7,7 +7,10 @@ was written by the refresh pipeline.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
+import time
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
@@ -17,6 +20,7 @@ from secrets import compare_digest
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -102,6 +106,58 @@ def _require_horizon(horizon_days: int) -> int:
             status_code=422, detail=f"horizon_days harus salah satu dari {config.HORIZONS}."
         )
     return horizon_days
+
+
+class AdminLogin(BaseModel):
+    username: str
+    password: str
+
+
+class AdminToken(BaseModel):
+    token: str
+    expires_at: int
+
+
+def _admin_token_key() -> bytes:
+    # Keyed on the admin password, so changing ADMIN_PASSWORD invalidates every
+    # issued token without any server-side session store.
+    return hashlib.sha256(f"idx-admin:{config.admin_password()}".encode()).digest()
+
+
+def _sign_admin_token(expires_at: int) -> str:
+    signature = hmac.new(_admin_token_key(), str(expires_at).encode(), hashlib.sha256)
+    return f"{expires_at}.{signature.hexdigest()}"
+
+
+def _verify_admin_token(token: str) -> bool:
+    expires_part, _, _ = token.partition(".")
+    try:
+        expires_at = int(expires_part)
+    except ValueError:
+        return False
+    if expires_at < int(time.time()):
+        return False
+    return compare_digest(token, _sign_admin_token(expires_at))
+
+
+def require_admin(authorization: str | None = Header(default=None)) -> None:
+    """Guard for every write endpoint. Read endpoints stay open for the viewer."""
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme != "Bearer" or not token or not _verify_admin_token(token.strip()):
+        raise HTTPException(
+            status_code=401,
+            detail="Fitur ini khusus admin. Masuk sebagai admin untuk melanjutkan.",
+        )
+
+
+@app.post("/api/v1/auth/login", response_model=AdminToken, tags=["system"])
+def admin_login(payload: AdminLogin) -> AdminToken:
+    username_ok = compare_digest(payload.username, config.admin_username())
+    password_ok = compare_digest(payload.password, config.admin_password())
+    if not (username_ok and password_ok):
+        raise HTTPException(status_code=401, detail="Username atau password salah.")
+    expires_at = int(time.time()) + config.ADMIN_TOKEN_HOURS * 3600
+    return AdminToken(token=_sign_admin_token(expires_at), expires_at=expires_at)
 
 
 @app.get("/", include_in_schema=False)
@@ -437,7 +493,9 @@ def model_versions(
     tags=["models"],
 )
 def activate_model_version(
-    version_id: int, session: Session = Depends(get_session)
+    version_id: int,
+    session: Session = Depends(get_session),
+    _: None = Depends(require_admin),
 ) -> ModelVersionOut:
     try:
         version = training.activate_version(session, version_id)
@@ -483,7 +541,9 @@ def update_logs(
 
 @app.post("/api/v1/update-logs/refresh", response_model=UpdateLogOut, tags=["system"])
 def trigger_refresh(
-    symbol: str | None = Query(default=None), session: Session = Depends(get_session)
+    symbol: str | None = Query(default=None),
+    session: Session = Depends(get_session),
+    _: None = Depends(require_admin),
 ) -> UpdateLogOut:
     """Manual data update (UC-06). Runs the same pipeline the scheduler runs."""
     symbols = (_require_symbol(symbol),) if symbol else config.SUPPORTED_SYMBOLS
@@ -511,7 +571,9 @@ def training_jobs(
 
 @app.post("/api/v1/training-jobs", response_model=TrainingAccepted, tags=["models"])
 def queue_training(
-    payload: TrainingRequest = Body(...), session: Session = Depends(get_session)
+    payload: TrainingRequest = Body(...),
+    session: Session = Depends(get_session),
+    _: None = Depends(require_admin),
 ) -> TrainingAccepted:
     """Start a training run, or reuse the version that already covers the pair."""
     symbol = _require_symbol(payload.symbol)

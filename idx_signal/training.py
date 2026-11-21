@@ -1,7 +1,8 @@
 """Retraining the reference architecture on the stored price history.
 
-A job trains the same three-layer LSTM stack the reference used, on the closes
-this service has stored, and records the result as a *candidate* model version.
+A job trains a scikit-learn voting ensemble (Ridge, gradient boosting and a
+random forest) on the closes this service has stored, and records the result as
+a *candidate* model version.
 Candidates never take over the dashboard on their own: the reference artifacts
 stay active until someone activates a candidate, so a training run cannot
 silently change the signals a user is reading.
@@ -26,7 +27,7 @@ from sqlalchemy.orm import Session
 
 from . import config, db
 from .metrics import score_classes
-from .model_registry import Scalers, artifact_sha256, build_model
+from .model_registry import ENSEMBLE_SUFFIX, ENSEMBLE_TYPE, Scalers, artifact_sha256, build_ensemble
 from .models import ModelVersion, TrainingJob
 from .signals import classify_return
 from .storage import active_model_version, price_frame, register_model_version
@@ -62,9 +63,9 @@ def build_samples(closes: np.ndarray, horizon_days: int) -> Sample:
     return Sample(windows=windows, targets=targets, current=windows[:, -1])
 
 
-def _retrain(symbol: str, horizon_days: int, epochs: int) -> tuple[dict, str, dict]:
-    """Fit a candidate model, returning (metrics, artifact path, config)."""
-    import keras
+def _retrain(symbol: str, horizon_days: int) -> tuple[dict, str, dict]:
+    """Fit a candidate ensemble, returning (metrics, artifact path, config)."""
+    import joblib
 
     with db.session() as session:
         frame = price_frame(session, symbol, limit=3000)
@@ -86,24 +87,10 @@ def _retrain(symbol: str, horizon_days: int, epochs: int) -> tuple[dict, str, di
     if not input_scale or not target_scale:
         raise TrainingUnavailable("deret latih tidak punya keragaman untuk diskalakan")
 
-    model = build_model(horizon_days)
-    model.compile(optimizer="adam", loss="mean_squared_error")
-    model.fit(
-        ((train_x - input_mean) / input_scale).reshape(-1, horizon_days, 1),
-        (train_y - target_mean) / target_scale,
-        validation_data=(
-            ((test_x - input_mean) / input_scale).reshape(-1, horizon_days, 1),
-            (test_y - target_mean) / target_scale,
-        ),
-        epochs=epochs,
-        batch_size=32,
-        verbose=0,
-        callbacks=[keras.callbacks.EarlyStopping(patience=3, restore_best_weights=True)],
-    )
+    model = build_ensemble()
+    model.fit((train_x - input_mean) / input_scale, (train_y - target_mean) / target_scale)
 
-    raw = np.asarray(
-        model.predict(((test_x - input_mean) / input_scale).reshape(-1, horizon_days, 1), verbose=0)
-    ).ravel()
+    raw = np.asarray(model.predict((test_x - input_mean) / input_scale)).ravel()
     predicted = raw * target_scale + target_mean
 
     actual_classes: list[str] = []
@@ -114,16 +101,15 @@ def _retrain(symbol: str, horizon_days: int, epochs: int) -> tuple[dict, str, di
         predicted_classes.append(classify_return(float(price), current, horizon_days)[0])
 
     scores = score_classes(actual_classes, predicted_classes)
-    scores["source"] = "retrained, chronological holdout"
-    scores["epochs"] = epochs
+    scores["source"] = "retrained ensemble, chronological holdout"
     scores["train_samples"] = int(split)
     scores["test_samples"] = int(len(windows) - split)
 
     artifact_dir = config.training_dir() / symbol
     artifact_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    artifact_path = artifact_dir / f"LSTM_{symbol}_Target_{horizon_days}_{stamp}.keras"
-    model.save(str(artifact_path))
+    artifact_path = artifact_dir / f"ENSEMBLE_{symbol}_Target_{horizon_days}_{stamp}{ENSEMBLE_SUFFIX}"
+    joblib.dump(model, artifact_path)
 
     scalers = Scalers(
         input_mean=input_mean,
@@ -132,10 +118,10 @@ def _retrain(symbol: str, horizon_days: int, epochs: int) -> tuple[dict, str, di
         target_scale=target_scale,
     )
     config_payload = {
-        "architecture": "3 x LSTM(96) + Dense(1)",
+        "model_type": ENSEMBLE_TYPE,
+        "architecture": "VotingRegressor(Ridge, GradientBoosting, RandomForest)",
         "input": "close window, H sessions",
         "source": "retrained",
-        "epochs": epochs,
         "data_until": str(frame["date"].iloc[-1]),
         **scalers.as_config(),
     }
@@ -167,7 +153,7 @@ def run_job(job_id: int) -> TrainingJob | None:
         symbol, horizon_days = job.symbol, job.horizon_days
 
     try:
-        scores, artifact_path, config_payload = _retrain(symbol, horizon_days, config.training_epochs())
+        scores, artifact_path, config_payload = _retrain(symbol, horizon_days)
     except Exception as error:  # a failed run must never look like a successful one
         logger.exception("Training job %s failed", job_id)
         with db.session() as session:

@@ -21,6 +21,19 @@ def client() -> TestClient:
         yield test_client
 
 
+@pytest.fixture
+def admin_client(client) -> TestClient:
+    response = client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin"})
+    assert response.status_code == 200, response.text
+    client.headers["Authorization"] = f"Bearer {response.json()['token']}"
+    return client
+
+
+def test_guarded_endpoints_reject_anonymous_callers(client):
+    assert client.post("/api/v1/update-logs/refresh").status_code == 401
+    assert client.post("/api/v1/model-versions/1/activate").status_code == 401
+
+
 def test_dashboard_and_assets_are_served(client):
     root = client.get("/")
     assert root.status_code == 200
@@ -94,7 +107,8 @@ def test_unsupported_horizon_is_a_422(client):
     assert client.get("/api/v1/predictions/ADRO?horizon_days=9").status_code == 422
 
 
-def test_manual_update_populates_the_dashboard(client, offline_fetch, reference_assets):
+def test_manual_update_populates_the_dashboard(admin_client, offline_fetch, reference_assets):
+    client = admin_client
     response = client.post("/api/v1/update-logs/refresh")
     assert response.status_code == 200, response.text
     entry = response.json()
@@ -248,7 +262,8 @@ def test_historical_signals_reject_an_unknown_ticker(client):
     assert response.status_code == 404
 
 
-def test_training_reuses_the_model_that_already_exists(client, reference_assets):
+def test_training_reuses_the_model_that_already_exists(admin_client, reference_assets):
+    client = admin_client
     with db.session() as session:
         ensure_reference_data(session)
         ensure_model_versions(session, ["ADRO"], [1])
@@ -264,7 +279,8 @@ def test_training_reuses_the_model_that_already_exists(client, reference_assets)
     assert client.get("/api/v1/training-jobs").json() == []
 
 
-def test_activation_switches_the_serving_version(client, reference_assets):
+def test_activation_switches_the_serving_version(admin_client, reference_assets):
+    client = admin_client
     with db.session() as session:
         versions = ensure_model_versions(session, ["ADRO"], [1])
     reference_version = versions[("ADRO", 1)]

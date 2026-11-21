@@ -725,6 +725,10 @@ table {
   color: var(--muted);
 }
 
+.train-form[hidden] {
+  display: none;
+}
+
 .train-form {
   display: flex;
   flex-wrap: wrap;

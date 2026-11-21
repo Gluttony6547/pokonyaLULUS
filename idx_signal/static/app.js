@@ -171,10 +171,75 @@ function deltaClass(value) {
   return "delta-flat";
 }
 
+const TOKEN_KEY = "idx-admin-token";
+const TOKEN_EXPIRY_KEY = "idx-admin-expires";
+
+function adminToken() {
+  const expires = Number(localStorage.getItem(TOKEN_EXPIRY_KEY) || 0);
+  if (!expires || expires * 1000 <= Date.now()) {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(TOKEN_EXPIRY_KEY);
+    return null;
+  }
+  return localStorage.getItem(TOKEN_KEY);
+}
+
+function setAdminSession(token, expiresAt) {
+  localStorage.setItem(TOKEN_KEY, token);
+  localStorage.setItem(TOKEN_EXPIRY_KEY, String(expiresAt));
+  renderAdminState();
+}
+
+function clearAdminSession() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(TOKEN_EXPIRY_KEY);
+  renderAdminState();
+}
+
+function renderAdminState() {
+  const loggedIn = Boolean(adminToken());
+  $("login-form").hidden = loggedIn;
+  $("logout-button").hidden = !loggedIn;
+  document.querySelectorAll("[data-admin-only]").forEach((element) => {
+    element.hidden = !loggedIn;
+  });
+}
+
+async function submitLogin(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = $("login-submit");
+  button.disabled = true;
+  try {
+    const session = await api("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: $("login-username").value,
+        password: $("login-password").value,
+      }),
+    });
+    setAdminSession(session.token, session.expires_at);
+    form.reset();
+    clearBanner();
+  } catch (error) {
+    clearAdminSession();
+    showBanner("error", "Login admin gagal.", error.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function api(path, options) {
+  const token = adminToken();
+  const { headers: extraHeaders, ...rest } = options || {};
   const response = await fetch(`${API}${path}`, {
-    headers: { Accept: "application/json" },
-    ...options,
+    ...rest,
+    headers: {
+      Accept: "application/json",
+      ...(extraHeaders || {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
   });
   const text = await response.text();
   let payload = null;
@@ -898,6 +963,8 @@ function renderVersions(rows) {
       button.type = "button";
       button.className = "button button-quiet";
       button.textContent = "Jadikan aktif";
+      button.dataset.adminOnly = "";
+      button.hidden = !adminToken();
       button.addEventListener("click", () => activateVersion(version.id));
       statusCell.appendChild(button);
     }
@@ -1131,6 +1198,12 @@ function initControls() {
     writeUrlState();
     loadHistory();
   });
+  $("login-form").addEventListener("submit", submitLogin);
+  $("logout-button").addEventListener("click", () => {
+    clearAdminSession();
+    clearBanner();
+  });
+  renderAdminState();
   $("train-form").addEventListener("submit", submitTraining);
   $("refresh-button").addEventListener("click", runRefresh);
   $("reference-date").addEventListener("change", (event) => {
