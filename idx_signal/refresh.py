@@ -146,10 +146,14 @@ def ensure_model_versions(
         for horizon in horizons:
             existing = active_model_version(session, symbol, horizon)
             identity_row = reference_artifact(symbol, horizon)
-            if existing is not None and existing.artifact_sha256 == identity_row["sha256"]:
-                # The same artifact can be checked out at a different absolute
-                # path on another host (for example, Windows to Vercel Linux).
-                existing.artifact_path = identity_row["path"]
+            if existing is not None:
+                # An active version already covers this pair. It can be the
+                # reference artifact or an ensemble somebody activated, and
+                # refresh must not put the reference back in front of it.
+                if existing.artifact_sha256 == identity_row["sha256"]:
+                    # The same artifact can be checked out at a different
+                    # absolute path on another host (Windows to Vercel Linux).
+                    existing.artifact_path = identity_row["path"]
                 if refresh_metrics and not existing.metrics:
                     try:
                         existing.metrics = metrics_module.evaluate(symbol, horizon)

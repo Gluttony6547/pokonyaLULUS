@@ -10,12 +10,37 @@ from sqlalchemy import func, select
 from idx_signal import config, db
 from idx_signal.models import DataUpdateLog, Prediction
 from idx_signal.refresh import RefreshInProgress, refresh, refresh_guard
-from idx_signal.storage import active_model_version, recent_updates
+from idx_signal.storage import active_model_version, recent_updates, store_prices
+from idx_signal.training import activate_version, queue_training_job, run_job
 
 
 def prediction_count() -> int:
     with db.session() as session:
         return session.scalar(select(func.count()).select_from(Prediction)) or 0
+
+
+def test_refresh_keeps_an_activated_candidate(offline_fetch, prices, reference_assets):
+    with db.session() as session:
+        store_prices(session, "ADRO", prices)
+        job, _ = queue_training_job(session, "ADRO", 1, force=True)
+        job_id = job.id
+    finished = run_job(job_id)
+    with db.session() as session:
+        activate_version(session, finished.model_version_id)
+
+    report = refresh(["ADRO"], horizons=(1,), kind="manual")
+
+    assert report.status == "success", report.warnings
+    with db.session() as session:
+        active = active_model_version(session, "ADRO", 1)
+        row = session.scalars(
+            select(Prediction)
+            .where(Prediction.symbol == "ADRO", Prediction.horizon_days == 1)
+            .order_by(Prediction.id.desc())
+            .limit(1)
+        ).first()
+    assert active.id == finished.model_version_id
+    assert row.model_version_id == finished.model_version_id
 
 
 def test_manual_refresh_writes_prices_predictions_and_a_log(offline_fetch, reference_assets):
