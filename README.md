@@ -142,11 +142,11 @@ production deployment. Container instances scale down after a few idle minutes,
 which is why the schedule is driven by cron and not by the in-process loop; the
 dashboard's own polling keeps an instance warm while somebody is looking at it.
 
-Retraining writes its artifact to the container filesystem, which is ephemeral
-on this platform. A retrained version therefore lives as long as the instance
-that trained it, and a candidate is never served until somebody activates it.
-On a host with a persistent volume (`IDX_TRAINING_DIR`) retrained artifacts
-survive.
+Retraining stores its artifact in Postgres (`model_artifacts`), so a candidate
+survives a cold start and a redeploy on a host whose filesystem is read-only.
+A candidate is never served until somebody activates it. On this platform the
+run finishes inside the request, because the instance freezes once the response
+is sent.
 
 ### Any Docker host
 

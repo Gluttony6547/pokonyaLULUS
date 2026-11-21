@@ -117,6 +117,10 @@ def artifact_sha256(path: str) -> str:
     return digest.hexdigest()
 
 
+def artifact_sha256_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
 ENSEMBLE_SUFFIX = ".joblib"
 ENSEMBLE_TYPE = "ensemble"
 LSTM_TYPE = "lstm"
@@ -140,6 +144,14 @@ def build_ensemble():
     )
 
 
+def _check_ensemble(model, name: str, horizon_days: int):
+    if getattr(model, "n_features_in_", None) != horizon_days:
+        raise ModelUnavailable(
+            f"{name} mengharapkan {getattr(model, 'n_features_in_', '?')} masukan, bukan {horizon_days}"
+        )
+    return model
+
+
 @lru_cache(maxsize=64)
 def load_ensemble(artifact_path: str, horizon_days: int):
     import joblib
@@ -149,16 +161,28 @@ def load_ensemble(artifact_path: str, horizon_days: int):
         model = joblib.load(path)
     except Exception as error:
         raise ModelUnavailable(f"berkas {path.name} gagal dimuat: {error}") from error
-    if getattr(model, "n_features_in_", None) != horizon_days:
-        raise ModelUnavailable(
-            f"{path.name} mengharapkan {getattr(model, 'n_features_in_', '?')} masukan, bukan {horizon_days}"
-        )
-    return model
+    return _check_ensemble(model, path.name, horizon_days)
+
+
+def load_ensemble_bytes(artifact_data: bytes, name: str, horizon_days: int):
+    import io
+
+    import joblib
+
+    try:
+        model = joblib.load(io.BytesIO(artifact_data))
+    except Exception as error:
+        raise ModelUnavailable(f"artefak {name} gagal dimuat: {error}") from error
+    return _check_ensemble(model, name, horizon_days)
 
 
 @lru_cache(maxsize=64)
-def load_model(artifact_path: str, horizon_days: int):
+def load_model(artifact_path: str, horizon_days: int, artifact_data: bytes | None = None):
     if model_type_of(artifact_path) == ENSEMBLE_TYPE:
+        if artifact_data is not None:
+            return load_ensemble_bytes(
+                artifact_data, artifact_filename(artifact_path), horizon_days
+            )
         return load_ensemble(artifact_path, horizon_days)
     path = Path(artifact_path)
     try:
@@ -207,6 +231,7 @@ def predict_price(
     horizon_days: int,
     closes: pd.Series | np.ndarray,
     scalers: Scalers,
+    artifact_data: bytes | None = None,
 ) -> float:
     """Predict the close `horizon_days` sessions ahead from the last H closes."""
     values = np.asarray(closes, dtype=float)
@@ -222,7 +247,7 @@ def predict_price(
     # Both scalers cover a single feature, so their stored mean and scale
     # reproduce sklearn's transform exactly.
     scaled = (window - scalers.input_mean) / scalers.input_scale
-    model = load_model(artifact_path, horizon_days)
+    model = load_model(artifact_path, horizon_days, artifact_data)
     if model_type_of(artifact_path) == ENSEMBLE_TYPE:
         predicted_scaled = float(model.predict(scaled.reshape(1, horizon_days))[0])
     else:

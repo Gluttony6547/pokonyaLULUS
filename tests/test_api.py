@@ -289,3 +289,18 @@ def test_activation_switches_the_serving_version(admin_client, reference_assets)
     assert response.status_code == 200
     assert response.json()["is_active"] is True
     assert client.post("/api/v1/model-versions/999999/activate").status_code == 404
+
+
+def test_training_finishes_inside_the_request_on_serverless(admin_client, prices, monkeypatch):
+    monkeypatch.setenv("VERCEL", "1")
+    with db.session() as session:
+        store_prices(session, "ADRO", prices)
+
+    response = admin_client.post(
+        "/api/v1/training-jobs", json={"symbol": "ADRO", "horizon_days": 1, "force": True}
+    )
+
+    assert response.status_code == 200, response.text
+    job = response.json()["job"]
+    assert job["status"] == "success", job
+    assert job["model_version_id"] is not None

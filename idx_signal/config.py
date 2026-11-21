@@ -330,12 +330,9 @@ def admin_password() -> str:
 ADMIN_TOKEN_HOURS = 12
 
 
-def training_dir() -> Path:
-    """Where retrained artifacts are written."""
-    override = env_value("IDX_TRAINING_DIR")
-    path = Path(override).expanduser().resolve() if override else PROJECT_DIR / "data" / "trained"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+def on_serverless() -> bool:
+    """Vercel sets VERCEL in the function; its filesystem is read-only at runtime."""
+    return bool(env_value("VERCEL"))
 
 
 def training_inline() -> bool:

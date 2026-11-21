@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
+
 import numpy as np
 import pytest
 from sqlalchemy import select
 
-from idx_signal import config, db
-from idx_signal.models import ModelVersion, TrainingJob
+from idx_signal import db
+from idx_signal.historical import signals_for_date
+from idx_signal.models import ModelArtifact, ModelVersion, TrainingJob
 from idx_signal.storage import active_model_version, store_prices
 from idx_signal.training import (
     TrainingUnavailable,
@@ -57,10 +61,7 @@ def test_force_queues_even_when_a_model_exists(reference_assets):
     assert job.status == "queued"
 
 
-def test_a_run_registers_an_inactive_candidate(prices, tmp_path, monkeypatch):
-    monkeypatch.setenv("IDX_TRAINING_DIR", str(tmp_path / "trained"))
-    config.training_dir.cache_clear() if hasattr(config.training_dir, "cache_clear") else None
-
+def test_a_run_registers_an_inactive_candidate(prices):
     with db.session() as session:
         store_prices(session, "ADRO", prices)
         job, _ = queue_training_job(session, "ADRO", 1, force=True)
@@ -82,13 +83,11 @@ def test_a_run_registers_an_inactive_candidate(prices, tmp_path, monkeypatch):
         assert 0.0 <= version.metrics["accuracy"] <= 1.0
         # The candidate stays out of the serving path until it is activated.
         assert active_model_version(session, "ADRO", 1) is None
-        trained_files = list((tmp_path / "trained" / "ADRO").glob("*.joblib"))
-    assert len(trained_files) == 1
+        stored = session.get(ModelArtifact, version.id)
+        assert stored is not None and stored.content
 
 
-def test_activating_a_candidate_makes_it_the_serving_version(prices, tmp_path, monkeypatch):
-    monkeypatch.setenv("IDX_TRAINING_DIR", str(tmp_path / "trained"))
-
+def test_activating_a_candidate_makes_it_the_serving_version(prices):
     with db.session() as session:
         store_prices(session, "ADRO", prices)
         job, _ = queue_training_job(session, "ADRO", 1, force=True)
@@ -102,7 +101,7 @@ def test_activating_a_candidate_makes_it_the_serving_version(prices, tmp_path, m
         assert active.id == version.id
 
 
-def test_a_failed_run_is_recorded_as_failed(prices, monkeypatch):
+def test_a_failed_run_is_recorded_as_failed():
     # No stored prices for this ticker, so training cannot produce samples.
     with db.session() as session:
         job, _ = queue_training_job(session, "TLKM", 5, force=True)
@@ -116,3 +115,39 @@ def test_a_failed_run_is_recorded_as_failed(prices, monkeypatch):
         assert session.scalar(select(ModelVersion).where(ModelVersion.symbol == "TLKM")) is None
         row = session.get(TrainingJob, job_id)
         assert row.status == "failed"
+
+
+def test_a_trained_artifact_is_stored_in_the_database(prices):
+    with db.session() as session:
+        store_prices(session, "ADRO", prices)
+        job, _ = queue_training_job(session, "ADRO", 1, force=True)
+        job_id = job.id
+    finished = run_job(job_id)
+
+    assert finished.status == "success", finished.error_message
+    with db.session() as session:
+        version = session.get(ModelVersion, finished.model_version_id)
+        stored = session.get(ModelArtifact, version.id)
+    assert stored is not None and stored.content
+    assert version.artifact_sha256 == hashlib.sha256(stored.content).hexdigest()
+
+
+def test_an_activated_database_artifact_recomputes_signals(prices):
+    with db.session() as session:
+        store_prices(session, "ADRO", prices)
+        job, _ = queue_training_job(session, "ADRO", 1, force=True)
+        job_id = job.id
+    finished = run_job(job_id)
+
+    with db.session() as session:
+        version = session.get(ModelVersion, finished.model_version_id)
+        # Nothing on disk may be needed once the version serves predictions.
+        assert not Path(version.artifact_path).exists()
+        activate_version(session, version.id)
+    reference = prices.iloc[-1]["date"]
+    with db.session() as session:
+        result = signals_for_date(session, "ADRO", reference, horizons=(1,))
+
+    row = result.signals[0]
+    assert row.model_version_id == version.id
+    assert row.predicted_price > 0

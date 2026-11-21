@@ -40,6 +40,7 @@ from .storage import (
     active_model_version,
     ensure_reference_data,
     log_update,
+    model_artifact_bytes,
     register_model_version,
     store_prediction,
     store_prices,
@@ -280,7 +281,11 @@ def refresh(
                     try:
                         scalers = Scalers.from_config(version.config)
                         predicted = predict_price(
-                            version.artifact_path, horizon, closes, scalers
+                            version.artifact_path,
+                            horizon,
+                            closes,
+                            scalers,
+                            model_artifact_bytes(session, version.id),
                         )
                     except ModelUnavailable as error:
                         failed += 1

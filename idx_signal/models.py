@@ -16,6 +16,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     MetaData,
     Numeric,
     SmallInteger,
@@ -106,6 +107,17 @@ class ModelVersion(Base):
         CheckConstraint("horizon_days IN (1, 5, 10, 20, 50)", name="ck_model_versions_horizon"),
         Index("idx_model_versions_lookup", "symbol", "horizon_days", "is_active"),
     )
+
+
+class ModelArtifact(Base):
+    """The saved model file itself, so a trained version survives a read-only host."""
+
+    __tablename__ = "model_artifacts"
+
+    model_version_id: Mapped[int] = mapped_column(
+        ForeignKey("model_versions.id", ondelete="CASCADE"), primary_key=True
+    )
+    content: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
 
 
 class TrainingJob(Base):

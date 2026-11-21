@@ -589,6 +589,22 @@ def queue_training(
             model_version=ModelVersionOut.model_validate(existing) if existing else None,
         )
     session.commit()
+    if config.on_serverless():
+        # The instance freezes after the response, so a background thread would
+        # stop mid-run. Finish the job while the request is still alive.
+        training.run_job(job.id)
+        session.refresh(job)
+        if job.status == "failed":
+            return TrainingAccepted(
+                reused=False,
+                message=f"Pelatihan {symbol} T{horizon} gagal: {job.error_message}",
+                job=TrainingJobOut.model_validate(job),
+            )
+        return TrainingAccepted(
+            reused=False,
+            message=f"Pelatihan {symbol} T{horizon} selesai. Versi kandidat menunggu aktivasi.",
+            job=TrainingJobOut.model_validate(job),
+        )
     training.start_background_worker()
     return TrainingAccepted(
         reused=False,

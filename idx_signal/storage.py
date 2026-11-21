@@ -14,6 +14,7 @@ from .models import (
     DataUpdateLog,
     DailyPrice,
     MarketHoliday,
+    ModelArtifact,
     ModelVersion,
     Prediction,
     Stock,
@@ -161,6 +162,7 @@ def register_model_version(
     data_until: date,
     metrics: dict,
     config_payload: dict,
+    artifact_bytes: bytes | None = None,
 ) -> ModelVersion:
     """Insert the version or return the existing row with the same artifact."""
     existing = session.scalars(
@@ -175,6 +177,8 @@ def register_model_version(
         existing.config = config_payload or existing.config
         existing.data_until = data_until
         existing.is_active = True
+        if artifact_bytes is not None and session.get(ModelArtifact, existing.id) is None:
+            session.add(ModelArtifact(model_version_id=existing.id, content=artifact_bytes))
         return existing
 
     version = ModelVersion(
@@ -190,7 +194,17 @@ def register_model_version(
     )
     session.add(version)
     session.flush()
+    if artifact_bytes is not None:
+        session.add(ModelArtifact(model_version_id=version.id, content=artifact_bytes))
+        session.flush()
     return version
+
+
+def model_artifact_bytes(session: Session, model_version_id: int) -> bytes | None:
+    """The stored model file, for versions trained into the database."""
+    return session.scalar(
+        select(ModelArtifact.content).where(ModelArtifact.model_version_id == model_version_id)
+    )
 
 
 def latest_price_date(session: Session, symbol: str) -> date | None:

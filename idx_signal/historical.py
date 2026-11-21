@@ -30,6 +30,7 @@ from .storage import (
     active_model_version,
     close_on_or_after,
     first_price_date_on_or_after,
+    model_artifact_bytes,
     nth_price_date,
     price_date_range,
     price_frame_between,
@@ -164,18 +165,26 @@ def _calendar_note(known_years: frozenset[int]) -> str:
     )
 
 
-def _model_for(session: Session, symbol: str, horizon_days: int) -> tuple[str, Scalers, int | None]:
+def _model_for(
+    session: Session, symbol: str, horizon_days: int
+) -> tuple[str, Scalers, int | None, bytes | None]:
     """The active model version, or the saved reference artifact when none is registered."""
     version = active_model_version(session, symbol, horizon_days)
     if version is not None:
         try:
-            return version.artifact_path, Scalers.from_config(version.config), version.id
+            return (
+                version.artifact_path,
+                Scalers.from_config(version.config),
+                version.id,
+                model_artifact_bytes(session, version.id),
+            )
         except ModelUnavailable:
             # A version without stored scalers cannot predict; the reference pair can.
             pass
     return (
         reference_artifact(symbol, horizon_days)["path"],
         scalers_from_research(symbol, horizon_days),
+        None,
         None,
     )
 
@@ -264,9 +273,9 @@ def signals_for_date(
             )
             continue
 
-        artifact_path, scalers, version_id = _model_for(session, symbol, horizon)
+        artifact_path, scalers, version_id, artifact_data = _model_for(session, symbol, horizon)
         predicted = float(
-            predict_price(artifact_path, horizon, frame["close"], scalers)
+            predict_price(artifact_path, horizon, frame["close"], scalers, artifact_data)
         )
         signal, change_pct = classify_return(predicted, reference_close, horizon)
         z = out_of_distribution_z(reference_close, scalers.input_mean, scalers.input_scale)

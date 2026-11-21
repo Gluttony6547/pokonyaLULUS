@@ -15,6 +15,7 @@ a reader of the dashboard actually has.
 
 from __future__ import annotations
 
+import io
 import logging
 import threading
 import time
@@ -27,7 +28,13 @@ from sqlalchemy.orm import Session
 
 from . import config, db
 from .metrics import score_classes
-from .model_registry import ENSEMBLE_SUFFIX, ENSEMBLE_TYPE, Scalers, artifact_sha256, build_ensemble
+from .model_registry import (
+    ENSEMBLE_SUFFIX,
+    ENSEMBLE_TYPE,
+    Scalers,
+    artifact_sha256_bytes,
+    build_ensemble,
+)
 from .models import ModelVersion, TrainingJob
 from .signals import classify_return
 from .storage import active_model_version, price_frame, register_model_version
@@ -63,8 +70,8 @@ def build_samples(closes: np.ndarray, horizon_days: int) -> Sample:
     return Sample(windows=windows, targets=targets, current=windows[:, -1])
 
 
-def _retrain(symbol: str, horizon_days: int) -> tuple[dict, str, dict]:
-    """Fit a candidate ensemble, returning (metrics, artifact path, config)."""
+def _retrain(symbol: str, horizon_days: int) -> tuple[dict, str, dict, bytes]:
+    """Fit a candidate ensemble, returning (metrics, artifact name, config, payload)."""
     import joblib
 
     with db.session() as session:
@@ -105,11 +112,10 @@ def _retrain(symbol: str, horizon_days: int) -> tuple[dict, str, dict]:
     scores["train_samples"] = int(split)
     scores["test_samples"] = int(len(windows) - split)
 
-    artifact_dir = config.training_dir() / symbol
-    artifact_dir.mkdir(parents=True, exist_ok=True)
+    buffer = io.BytesIO()
+    joblib.dump(model, buffer)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    artifact_path = artifact_dir / f"ENSEMBLE_{symbol}_Target_{horizon_days}_{stamp}{ENSEMBLE_SUFFIX}"
-    joblib.dump(model, artifact_path)
+    artifact_name = f"ENSEMBLE_{symbol}_Target_{horizon_days}_{stamp}{ENSEMBLE_SUFFIX}"
 
     scalers = Scalers(
         input_mean=input_mean,
@@ -125,7 +131,7 @@ def _retrain(symbol: str, horizon_days: int) -> tuple[dict, str, dict]:
         "data_until": str(frame["date"].iloc[-1]),
         **scalers.as_config(),
     }
-    return scores, str(artifact_path), config_payload
+    return scores, artifact_name, config_payload, buffer.getvalue()
 
 
 def queue_training_job(
@@ -153,7 +159,7 @@ def run_job(job_id: int) -> TrainingJob | None:
         symbol, horizon_days = job.symbol, job.horizon_days
 
     try:
-        scores, artifact_path, config_payload = _retrain(symbol, horizon_days)
+        scores, artifact_name, config_payload, payload = _retrain(symbol, horizon_days)
     except Exception as error:  # a failed run must never look like a successful one
         logger.exception("Training job %s failed", job_id)
         with db.session() as session:
@@ -176,11 +182,12 @@ def run_job(job_id: int) -> TrainingJob | None:
             session,
             symbol=symbol,
             horizon_days=horizon_days,
-            artifact_path=artifact_path,
-            artifact_sha256=artifact_sha256(artifact_path),
+            artifact_path=artifact_name,
+            artifact_sha256=artifact_sha256_bytes(payload),
             data_until=data_until,
             metrics=scores,
             config_payload=config_payload,
+            artifact_bytes=payload,
         )
         # A candidate stays out of the serving path until it is activated.
         version.is_active = False
@@ -231,8 +238,12 @@ def run_queued_once() -> bool:
 
 
 def start_background_worker() -> threading.Thread | None:
-    """Run queued jobs in a daemon thread, for workstations and single instances."""
-    if not config.training_inline():
+    """Run queued jobs in a daemon thread, for workstations and single instances.
+
+    A serverless host freezes the instance once the response is sent, so the
+    API runs the job before replying there instead of starting this thread.
+    """
+    if config.on_serverless() or not config.training_inline():
         return None
 
     def loop() -> None:
