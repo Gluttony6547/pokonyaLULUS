@@ -91,9 +91,16 @@ function createDashboard() {
       return elements.get(id);
     },
   };
+  const stored = new Map();
+  const localStorage = {
+    getItem: (key) => (stored.has(key) ? stored.get(key) : null),
+    setItem: (key, value) => stored.set(key, String(value)),
+    removeItem: (key) => stored.delete(key),
+  };
   const context = vm.createContext({
     document,
     URLSearchParams,
+    localStorage,
     fetch: () => Promise.reject(new Error("Unexpected network request")),
     window: {
       location: { pathname: "/" },

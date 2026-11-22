@@ -51,6 +51,15 @@ def build_parser() -> argparse.ArgumentParser:
     worker.add_argument("--once", action="store_true", help="run at most one job and exit")
     worker.add_argument("--poll-seconds", type=int, default=15)
 
+    prune = sub.add_parser("prune", help="drop superseded model versions and their stored models")
+    prune.add_argument(
+        "--keep-references",
+        type=int,
+        default=1,
+        help="inactive versions kept per ticker and horizon for rollback",
+    )
+    prune.add_argument("--dry-run", action="store_true", help="report without deleting")
+
     train = sub.add_parser("train", help="queue a training run and wait for it")
     train.add_argument("--symbol", required=True)
     train.add_argument("--horizon", type=int, required=True)
@@ -131,6 +140,18 @@ def main(argv: list[str] | None = None) -> int:
             print(outcome.to_text())
             return outcome.exit_code()
         run_forever()
+        return 0
+
+    if args.command == "prune":
+        from . import db
+        from .storage import prune_model_versions
+
+        db.init_db()
+        with db.session() as session:
+            report = prune_model_versions(
+                session, keep_references=args.keep_references, dry_run=args.dry_run
+            )
+        print(report.to_text())
         return 0
 
     if args.command == "train-worker":

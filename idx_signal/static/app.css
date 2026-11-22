@@ -212,7 +212,8 @@ abbr {
 }
 
 .field select,
-.field input[type="date"] {
+.field input[type="date"],
+.field input[type="file"] {
   font: inherit;
   font-size: 0.9rem;
   color: var(--ink);

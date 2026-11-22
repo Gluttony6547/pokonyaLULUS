@@ -36,6 +36,7 @@ python -m idx_signal.cli seed        # create tables and seed tickers and holida
 python -m idx_signal.cli refresh     # fetch prices and write signals
 python -m idx_signal.cli verify      # serving path vs the committed research output
 python -m idx_signal.cli serve       # dashboard and API
+python -m idx_signal.cli prune       # drop superseded versions, keep the rollback one
 python -m idx_signal.cli schedule    # the due check, in a loop
 ```
 

@@ -7,13 +7,14 @@ from datetime import date
 from sqlalchemy import func, select
 
 from idx_signal import db
-from idx_signal.models import DailyPrice, ModelVersion
+from idx_signal.models import DailyPrice, ModelArtifact, ModelVersion, Prediction
 from idx_signal.storage import (
     active_model_version,
     log_update,
     nth_price_date,
     price_date_range,
     price_frame_until,
+    prune_model_versions,
     register_model_version,
     store_prices,
 )
@@ -81,6 +82,55 @@ def test_registering_the_same_artifact_twice_keeps_one_version():
     with db.session() as session:
         version = active_model_version(session, "ADRO", 1)
     assert version.metrics["accuracy"] == 0.6
+
+
+def test_prune_keeps_the_active_version_and_one_reference():
+    with db.session() as session:
+        versions = [
+            register_model_version(
+                session,
+                symbol="ADRO",
+                horizon_days=1,
+                artifact_path=f"ENSEMBLE_ADRO_Target_1_{index}.joblib",
+                artifact_sha256=f"{index:064d}",
+                data_until=date(2026, 11, 20),
+                metrics={},
+                config_payload={},
+                artifact_bytes=b"model",
+            )
+            for index in range(1, 5)
+        ]
+        # The newest version serves; the older ones are history.
+        for version in versions[:-1]:
+            version.is_active = False
+        session.add(
+            Prediction(
+                symbol="ADRO",
+                horizon_days=1,
+                model_version_id=versions[0].id,
+                data_as_of=date(2026, 11, 18),
+                signal="HOLD",
+                last_close=2000.0,
+                return_pct=0.4,
+                threshold_pct=1.5,
+            )
+        )
+
+    with db.session() as session:
+        report = prune_model_versions(session, keep_references=1)
+
+    assert report.removed == [versions[1].id]
+    assert report.kept_for_history == [versions[0].id]
+    assert report.removed_artifacts == [versions[1].id]
+    assert report.artifact_bytes == len(b"model")
+
+    with db.session() as session:
+        remaining = set(session.scalars(select(ModelVersion.id)))
+        artifacts = set(session.scalars(select(ModelArtifact.model_version_id)))
+        recorded = session.scalars(select(Prediction.model_version_id)).all()
+    assert remaining == {versions[0].id, versions[2].id, versions[3].id}
+    assert artifacts == {versions[2].id, versions[3].id}
+    assert recorded == [versions[0].id]
 
 
 def test_update_log_records_the_run():

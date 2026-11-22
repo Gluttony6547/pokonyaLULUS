@@ -4,6 +4,7 @@ sqlalchemy>=2.0,<3
 psycopg[binary]>=3.2,<4
 python-dotenv>=1.0,<2
 pydantic>=2.9,<3
+python-multipart>=0.0.9,<1
 pandas>=2.2,<4
 numpy>=2.0,<3
 scikit-learn>=1.6,<2

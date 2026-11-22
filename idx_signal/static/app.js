@@ -4,6 +4,8 @@ const API = "/api/v1";
 const WIB = "Asia/Jakarta";
 const HORIZONS = [1, 5, 10, 20, 50];
 const WINDOW = Math.max(...HORIZONS);
+const GUEST_HISTORY_LIMIT = 10;
+const ADMIN_HISTORY_LIMIT = 200;
 
 const state = {
   symbols: [],
@@ -203,6 +205,16 @@ function renderAdminState() {
   document.querySelectorAll("[data-admin-only]").forEach((element) => {
     element.hidden = !loggedIn;
   });
+  renderHistoryScope();
+  // The history length follows the session, so it is refetched on a change.
+  if (state.symbol) loadHistory();
+}
+
+function renderHistoryScope() {
+  $("history-sub").textContent = adminToken()
+    ? `Tanggal harga dan waktu pembuatan tercatat. Menampilkan hingga ${ADMIN_HISTORY_LIMIT} prediksi terakhir.`
+    : `Tanggal harga dan waktu pembuatan tercatat. Menampilkan ${GUEST_HISTORY_LIMIT} prediksi terakhir; ` +
+      "masuk sebagai admin untuk riwayat lengkap.";
 }
 
 async function submitLogin(event) {
@@ -862,9 +874,10 @@ async function loadHistory() {
   const symbol = state.symbol;
   const horizon = state.historyHorizon;
   setState("history-state", "", "Memuat riwayat…", "");
+  const limit = adminToken() ? ADMIN_HISTORY_LIMIT : GUEST_HISTORY_LIMIT;
   try {
     const rows = await api(
-      `/predictions/${symbol}?horizon_days=${encodeURIComponent(horizon)}&limit=24`,
+      `/predictions/${symbol}?horizon_days=${encodeURIComponent(horizon)}&limit=${limit}`,
     );
     if (state.symbol !== symbol || state.historyHorizon !== horizon) return;
     renderHistory(rows);
@@ -935,11 +948,12 @@ function renderVersions(rows) {
   rows.forEach((version) => {
     const metrics = version.metrics || {};
     const origin = (version.config && version.config.source) || "tidak diketahui";
+    const originLabel = { retrained: "latih ulang", uploaded: "unggahan" }[origin] || "acuan";
     const row = document.createElement("tr");
     row.innerHTML = `
       <td data-label="Rentang waktu"><span class="horizon">${horizonLabel(version.horizon_days)}</span></td>
       <td data-label="Versi">#${version.id}<br /><span class="artifact">${formatTimestamp(version.trained_at)}</span></td>
-      <td data-label="Asal">${escapeHtml(origin === "retrained" ? "latih ulang" : "acuan")}</td>
+      <td data-label="Asal">${escapeHtml(originLabel)}</td>
       <td data-label="Akurasi">${
         metrics.accuracy === undefined
           ? "belum dievaluasi"
@@ -988,6 +1002,42 @@ async function loadVersions() {
       label: "Coba lagi",
       run: () => loadVersions(),
     });
+  }
+}
+
+async function submitUpload(event) {
+  event.preventDefault();
+  const button = $("upload-submit");
+  const input = $("upload-file");
+  const file = input.files && input.files[0];
+  if (!file) {
+    showBanner(
+      "warn",
+      "Pilih berkas model dulu.",
+      "Berkas berekstensi .joblib berisi model ensemble untuk rentang waktu yang dipilih.",
+    );
+    return;
+  }
+  const body = new FormData();
+  body.append("symbol", state.symbol);
+  body.append("horizon_days", $("upload-horizon").value);
+  body.append("file", file);
+  button.disabled = true;
+  button.textContent = "Mengunggah";
+  try {
+    const version = await api("/model-versions/upload", { method: "POST", body });
+    showBanner(
+      "ok",
+      `Model tersimpan sebagai versi #${version.id}.`,
+      "Versi ini belum aktif. Aktifkan dari daftar versi setelah diperiksa.",
+    );
+    $("upload-form").reset();
+    await loadVersions();
+  } catch (error) {
+    showBanner("error", "Model gagal diunggah.", error.message);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Unggah model";
   }
 }
 
@@ -1186,7 +1236,7 @@ function initControls() {
   controlsBound = true;
   initTheme();
   HORIZONS.forEach((days) => {
-    [ $("history-horizon"), $("train-horizon") ].forEach((select) => {
+    [ $("history-horizon"), $("train-horizon"), $("upload-horizon") ].forEach((select) => {
       const option = document.createElement("option");
       option.value = String(days);
       option.textContent = horizonLabel(days);
@@ -1204,6 +1254,7 @@ function initControls() {
     clearBanner();
   });
   renderAdminState();
+  $("upload-form").addEventListener("submit", submitUpload);
   $("train-form").addEventListener("submit", submitTraining);
   $("refresh-button").addEventListener("click", runRefresh);
   $("reference-date").addEventListener("change", (event) => {

@@ -142,8 +142,9 @@
         <div class="panel-head">
           <div>
             <h2 id="history-heading">Riwayat sinyal</h2>
-            <p class="panel-sub">
-              Tanggal harga dan waktu pembuatan tercatat agar setiap sinyal bisa ditelusuri.
+            <p class="panel-sub" id="history-sub">
+              Tanggal harga dan waktu pembuatan tercatat. Menampilkan 10 prediksi terakhir; masuk sebagai
+              admin untuk riwayat lengkap.
             </p>
           </div>
           <label class="field">
@@ -189,10 +190,23 @@
           <div>
             <h2 id="models-heading">Model dan pelatihan</h2>
             <p class="panel-sub">
-              Model acuan sudah diverifikasi. Model hasil pelatihan ulang menjadi kandidat dan baru digunakan setelah diaktifkan.
+              Model acuan sudah diverifikasi. Model hasil pelatihan ulang maupun unggahan menjadi kandidat dan baru
+              digunakan setelah diaktifkan.
             </p>
           </div>
         </div>
+
+        <form class="train-form" id="upload-form" data-admin-only>
+          <label class="field">
+            <span>Rentang waktu</span>
+            <select id="upload-horizon"></select>
+          </label>
+          <label class="field">
+            <span>Berkas model (.joblib)</span>
+            <input type="file" id="upload-file" accept=".joblib" required />
+          </label>
+          <button type="submit" class="button" id="upload-submit">Unggah model</button>
+        </form>
 
         <form class="train-form" id="train-form" data-admin-only>
           <label class="field">

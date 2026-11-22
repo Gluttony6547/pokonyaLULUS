@@ -27,7 +27,12 @@ Asia/Jakarta, skipping weekends and recorded IDX holidays.
   holiday table does not cover.
 - Price chart, indicator context (SMA, RSI, MACD, Bollinger), signal history per
   horizon, data update log, and model versions with their holdout metrics.
-- Retraining on the stored price history, queued as a job with visible status.
+- Retraining on the stored price history, queued as a job with visible status,
+  and uploading a saved ensemble as a new candidate version. An upload never
+  replaces the version that is serving; it waits for the same activation step a
+  retrained candidate does.
+- Prediction history: the ten newest stored signals for a viewer, and the full
+  history after an admin login.
 - Light and dark themes, keyboard navigation, and explicit empty, loading, and
   error states.
 
@@ -147,6 +152,14 @@ survives a cold start and a redeploy on a host whose filesystem is read-only.
 A candidate is never served until somebody activates it. On this platform the
 run finishes inside the request, because the instance freezes once the response
 is sent.
+
+Every stored model costs a few megabytes, so superseded versions are pruned
+with `python -m idx_signal.cli prune`. Per ticker and horizon it keeps the
+active version and the newest inactive one, which is what a rollback would
+activate, and removes the rest together with their stored model. A version a
+signal still points at keeps its row so the signal stays traceable, but loses
+its model file. `--keep-references` keeps more rollback candidates and
+`--dry-run` reports what would go.
 
 ### Any Docker host
 

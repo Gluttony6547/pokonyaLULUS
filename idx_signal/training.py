@@ -34,6 +34,8 @@ from .model_registry import (
     Scalers,
     artifact_sha256_bytes,
     build_ensemble,
+    load_ensemble_bytes,
+    scalers_from_research,
 )
 from .models import ModelVersion, TrainingJob
 from .signals import classify_return
@@ -196,6 +198,56 @@ def run_job(job_id: int) -> TrainingJob | None:
         job.model_version_id = version.id
         session.flush()
         return job
+
+
+def register_uploaded_model(
+    session: Session, symbol: str, horizon_days: int, payload: bytes, filename: str
+) -> ModelVersion:
+    """Store an uploaded artifact as a new candidate; never change a saved version."""
+    load_ensemble_bytes(payload, filename, horizon_days)
+    digest = artifact_sha256_bytes(payload)
+    duplicate = session.scalars(
+        select(ModelVersion).where(
+            ModelVersion.symbol == symbol,
+            ModelVersion.horizon_days == horizon_days,
+            ModelVersion.artifact_sha256 == digest,
+        )
+    ).first()
+    if duplicate is not None:
+        raise TrainingUnavailable(
+            f"berkas yang sama sudah tersimpan sebagai versi #{duplicate.id} "
+            f"untuk {symbol} T{horizon_days}"
+        )
+
+    # The prediction path scales its window before calling the model, and an
+    # uploaded file carries no scalers of its own.
+    scalers = scalers_from_research(symbol, horizon_days)
+    frame = price_frame(session, symbol, limit=1)
+    data_until = (
+        frame["date"].iloc[-1] if not frame.empty else datetime.now(timezone.utc).date()
+    )
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    version = register_model_version(
+        session,
+        symbol=symbol,
+        horizon_days=horizon_days,
+        artifact_path=f"UPLOADED_{symbol}_Target_{horizon_days}_{stamp}{ENSEMBLE_SUFFIX}",
+        artifact_sha256=digest,
+        data_until=data_until,
+        metrics={},
+        config_payload={
+            "model_type": ENSEMBLE_TYPE,
+            "architecture": "uploaded joblib model",
+            "input": "close window, H sessions",
+            "source": "uploaded",
+            **scalers.as_config(),
+        },
+        artifact_bytes=payload,
+    )
+    # An upload is a candidate too: it waits for an explicit activation.
+    version.is_active = False
+    session.flush()
+    return version
 
 
 def activate_version(session: Session, version_id: int) -> ModelVersion:

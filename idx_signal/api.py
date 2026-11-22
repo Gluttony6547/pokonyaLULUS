@@ -17,7 +17,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from secrets import compare_digest
 
-from fastapi import Body, Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -70,6 +70,10 @@ DESCRIPTION = (
 )
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+# The viewer sees the ten newest stored signals; the full history needs the admin token.
+GUEST_HISTORY_LIMIT = 10
+MAX_MODEL_UPLOAD_BYTES = 50 * 1024 * 1024
 
 
 @asynccontextmanager
@@ -140,10 +144,15 @@ def _verify_admin_token(token: str) -> bool:
     return compare_digest(token, _sign_admin_token(expires_at))
 
 
+def optional_admin(authorization: str | None = Header(default=None)) -> bool:
+    """Whether the caller holds a valid admin token, without rejecting anyone else."""
+    scheme, _, token = (authorization or "").partition(" ")
+    return scheme == "Bearer" and bool(token) and _verify_admin_token(token.strip())
+
+
 def require_admin(authorization: str | None = Header(default=None)) -> None:
     """Guard for every write endpoint. Read endpoints stay open for the viewer."""
-    scheme, _, token = (authorization or "").partition(" ")
-    if scheme != "Bearer" or not token or not _verify_admin_token(token.strip()):
+    if not optional_admin(authorization):
         raise HTTPException(
             status_code=401,
             detail="Fitur ini khusus admin. Masuk sebagai admin untuk melanjutkan.",
@@ -432,13 +441,16 @@ def prediction_history(
     horizon_days: int | None = Query(default=None),
     limit: int = Query(default=24, ge=1, le=200),
     session: Session = Depends(get_session),
+    is_admin: bool = Depends(optional_admin),
 ) -> list[SignalOut]:
     normalized = _require_symbol(symbol)
+    # A viewer gets the ten newest rows; anything longer is an admin read.
+    effective = limit if is_admin else min(limit, GUEST_HISTORY_LIMIT)
     query = select(Prediction).where(Prediction.symbol == normalized)
     if horizon_days is not None:
         query = query.where(Prediction.horizon_days == _require_horizon(horizon_days))
     rows = session.scalars(
-        query.order_by(Prediction.data_as_of.desc(), Prediction.id.desc()).limit(limit)
+        query.order_by(Prediction.data_as_of.desc(), Prediction.id.desc()).limit(effective)
     ).all()
     versions = {
         version.id: artifact_filename(version.artifact_path)
@@ -501,6 +513,44 @@ def activate_model_version(
         version = training.activate_version(session, version_id)
     except training.TrainingUnavailable as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+    return ModelVersionOut.model_validate(version)
+
+
+@app.post("/api/v1/model-versions/upload", response_model=ModelVersionOut, tags=["models"])
+async def upload_model_version(
+    file: UploadFile = File(...),
+    symbol: str = Form(...),
+    horizon_days: int = Form(...),
+    session: Session = Depends(get_session),
+    _: None = Depends(require_admin),
+) -> ModelVersionOut:
+    """Save an uploaded ensemble as a new candidate version.
+
+    The file is stored beside the trained artifacts and waits for an explicit
+    activation, so an upload never replaces the version that is serving.
+    """
+    normalized = _require_symbol(symbol)
+    horizon = _require_horizon(horizon_days)
+    filename = (file.filename or "").strip()
+    if not filename.lower().endswith(".joblib"):
+        raise HTTPException(status_code=422, detail="Berkas model harus berakhiran .joblib.")
+    payload = await file.read(MAX_MODEL_UPLOAD_BYTES + 1)
+    if not payload:
+        raise HTTPException(status_code=422, detail="Berkas model kosong.")
+    if len(payload) > MAX_MODEL_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Berkas model melebihi {MAX_MODEL_UPLOAD_BYTES // (1024 * 1024)} MB.",
+        )
+
+    try:
+        version = training.register_uploaded_model(
+            session, normalized, horizon, payload, filename
+        )
+    except training.TrainingUnavailable as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except ModelUnavailable as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     return ModelVersionOut.model_validate(version)
 
 

@@ -12,7 +12,13 @@ from idx_signal.api import app
 from idx_signal.historical import format_date_id
 from idx_signal.market_data import MarketDataUnavailable
 from idx_signal.refresh import ensure_model_versions
-from idx_signal.storage import ensure_reference_data, store_prices
+from idx_signal.storage import (
+    active_model_version,
+    ensure_reference_data,
+    model_artifact_bytes,
+    store_prediction,
+    store_prices,
+)
 
 
 @pytest.fixture
@@ -289,6 +295,127 @@ def test_activation_switches_the_serving_version(admin_client, reference_assets)
     assert response.status_code == 200
     assert response.json()["is_active"] is True
     assert client.post("/api/v1/model-versions/999999/activate").status_code == 404
+
+
+def ensemble_bytes(horizon_days: int) -> bytes:
+    import io
+
+    import joblib
+    import numpy as np
+
+    from idx_signal.model_registry import build_ensemble
+
+    rng = np.random.default_rng(11)
+    windows = rng.normal(2000.0, 100.0, size=(40, horizon_days))
+    targets = windows[:, -1] + rng.normal(0.0, 20.0, size=40)
+    buffer = io.BytesIO()
+    joblib.dump(build_ensemble().fit(windows, targets), buffer)
+    return buffer.getvalue()
+
+
+def test_upload_saves_a_candidate_without_touching_the_active_version(
+    admin_client, reference_assets
+):
+    client = admin_client
+    with db.session() as session:
+        ensure_model_versions(session, ["ADRO"], [1])
+    payload = ensemble_bytes(1)
+
+    response = client.post(
+        "/api/v1/model-versions/upload",
+        files={"file": ("custom_adro.joblib", payload, "application/octet-stream")},
+        data={"symbol": "ADRO", "horizon_days": "1"},
+    )
+
+    assert response.status_code == 200, response.text
+    version = response.json()
+    assert version["is_active"] is False
+    assert version["config"]["source"] == "uploaded"
+    assert version["artifact_path"].startswith("UPLOADED_ADRO_Target_1_")
+    with db.session() as session:
+        assert model_artifact_bytes(session, version["id"]) == payload
+        active = active_model_version(session, "ADRO", 1)
+    assert active.id != version["id"]
+
+    duplicate = client.post(
+        "/api/v1/model-versions/upload",
+        files={"file": ("custom_adro.joblib", payload, "application/octet-stream")},
+        data={"symbol": "ADRO", "horizon_days": "1"},
+    )
+    assert duplicate.status_code == 409
+    assert f"versi #{version['id']}" in duplicate.json()["detail"]
+
+
+def test_upload_rejects_a_model_fitted_for_another_horizon(admin_client, reference_assets):
+    response = admin_client.post(
+        "/api/v1/model-versions/upload",
+        files={"file": ("custom_adro.joblib", ensemble_bytes(5), "application/octet-stream")},
+        data={"symbol": "ADRO", "horizon_days": "1"},
+    )
+
+    assert response.status_code == 422
+    assert "mengharapkan 5 masukan" in response.json()["detail"]
+
+
+def test_upload_requires_the_admin_token_and_a_joblib_file(client):
+    anonymous = client.post(
+        "/api/v1/model-versions/upload",
+        files={"file": ("custom_adro.joblib", b"x", "application/octet-stream")},
+        data={"symbol": "ADRO", "horizon_days": "1"},
+    )
+    assert anonymous.status_code == 401
+
+
+def test_upload_refuses_a_file_with_another_extension(admin_client):
+    response = admin_client.post(
+        "/api/v1/model-versions/upload",
+        files={"file": ("custom_adro.pkl", b"x", "application/octet-stream")},
+        data={"symbol": "ADRO", "horizon_days": "1"},
+    )
+
+    assert response.status_code == 422
+    assert ".joblib" in response.json()["detail"]
+
+
+def seed_predictions(count: int = 12) -> None:
+    with db.session() as session:
+        version = ensure_model_versions(session, ["ADRO"], [1])[("ADRO", 1)]
+        for offset in range(count):
+            store_prediction(
+                session,
+                {
+                    "symbol": "ADRO",
+                    "horizon_days": 1,
+                    "model_version_id": version.id,
+                    "data_as_of": date(2026, 1, 1) + timedelta(days=offset),
+                    "target_date": date(2026, 1, 2) + timedelta(days=offset),
+                    "signal": "HOLD",
+                    "predicted_price": 2000.0,
+                    "last_close": 2000.0,
+                    "return_pct": 0.5,
+                    "threshold_pct": 1.5,
+                    "ood_z": 0.1,
+                    "ood_flag": False,
+                    "warnings": None,
+                },
+            )
+
+
+def test_guest_history_stops_at_the_ten_newest_rows(client, reference_assets):
+    seed_predictions()
+
+    rows = client.get("/api/v1/predictions/ADRO?limit=200").json()
+
+    assert len(rows) == 10
+    assert rows[0]["data_as_of"] > rows[-1]["data_as_of"]
+
+
+def test_admin_history_returns_every_stored_row(admin_client, reference_assets):
+    seed_predictions()
+
+    rows = admin_client.get("/api/v1/predictions/ADRO?limit=200").json()
+
+    assert len(rows) == 12
 
 
 def test_training_finishes_inside_the_request_on_serverless(admin_client, prices, monkeypatch):

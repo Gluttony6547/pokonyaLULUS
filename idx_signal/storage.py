@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 
 import pandas as pd
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -205,6 +206,110 @@ def model_artifact_bytes(session: Session, model_version_id: int) -> bytes | Non
     return session.scalar(
         select(ModelArtifact.content).where(ModelArtifact.model_version_id == model_version_id)
     )
+
+
+@dataclass
+class PruneReport:
+    """What one prune run kept and removed."""
+
+    kept: list[int] = field(default_factory=list)
+    kept_for_history: list[int] = field(default_factory=list)
+    removed: list[int] = field(default_factory=list)
+    removed_artifacts: list[int] = field(default_factory=list)
+    artifact_bytes: int = 0
+    dry_run: bool = False
+
+    def to_text(self) -> str:
+        verb = "would remove" if self.dry_run else "removed"
+        lines = [
+            f"kept {len(self.kept)} versions",
+            f"{verb} {len(self.removed)} versions and {len(self.removed_artifacts)} stored "
+            f"artifacts ({self.artifact_bytes / 1_048_576:.1f} MiB)",
+        ]
+        if self.kept_for_history:
+            lines.append(
+                "rows kept for signal history but stripped of their artifact: "
+                + ", ".join(map(str, self.kept_for_history))
+            )
+        return "\n".join(lines)
+
+
+def prune_model_versions(
+    session: Session, keep_references: int = 1, dry_run: bool = False
+) -> PruneReport:
+    """Drop superseded versions and their stored models, keeping a rollback option.
+
+    Per ticker and horizon the active version stays, plus the newest
+    `keep_references` inactive ones, so somebody can still activate the model
+    that was served before the last retraining. Older rows keep their metadata
+    when a stored prediction points at them, because a signal must stay
+    traceable to the version that produced it; their artifact, which is what a
+    model file costs, goes away.
+    """
+    if keep_references < 0:
+        raise ValueError("keep_references must not be negative")
+
+    rows = session.scalars(
+        select(ModelVersion).order_by(
+            ModelVersion.symbol,
+            ModelVersion.horizon_days,
+            ModelVersion.trained_at.desc(),
+            ModelVersion.id.desc(),
+        )
+    ).all()
+    groups: dict[tuple[str, int], list[ModelVersion]] = {}
+    for version in rows:
+        groups.setdefault((version.symbol, version.horizon_days), []).append(version)
+
+    report = PruneReport(dry_run=dry_run)
+    for group in groups.values():
+        active = [version for version in group if version.is_active]
+        if active:
+            report.kept.append(active[0].id)
+            inactive = [version for version in group if not version.is_active]
+        else:
+            # Nothing is serving this pair, so the newest version is the one to hold on to.
+            report.kept.append(group[0].id)
+            inactive = group[1:]
+        report.kept.extend(version.id for version in inactive[:keep_references])
+        superseded = [version.id for version in inactive[keep_references:]]
+
+        if not superseded:
+            continue
+        referenced = set(
+            session.scalars(
+                select(Prediction.model_version_id)
+                .where(Prediction.model_version_id.in_(superseded))
+                .distinct()
+            )
+        )
+        stored = dict(
+            session.execute(
+                select(ModelArtifact.model_version_id, func.length(ModelArtifact.content)).where(
+                    ModelArtifact.model_version_id.in_(superseded)
+                )
+            ).all()
+        )
+        prunable = [version_id for version_id in superseded if version_id not in referenced]
+        report.kept_for_history.extend(
+            version_id for version_id in superseded if version_id in referenced
+        )
+        report.removed.extend(prunable)
+        report.removed_artifacts.extend(
+            version_id for version_id in prunable if version_id in stored
+        )
+        report.artifact_bytes += sum(stored.get(version_id, 0) for version_id in prunable)
+
+        if dry_run:
+            continue
+        if stored:
+            session.execute(
+                delete(ModelArtifact).where(ModelArtifact.model_version_id.in_(stored))
+            )
+        if prunable:
+            session.execute(delete(ModelVersion).where(ModelVersion.id.in_(prunable)))
+    session.flush()
+    return report
 
 
 def latest_price_date(session: Session, symbol: str) -> date | None:
